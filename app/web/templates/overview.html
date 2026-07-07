@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>ภาพรวมอัตราดอกเบี้ยเงินฝาก</h1>
+<p class="page-desc">เปรียบเทียบอัตราปัจจุบันกับประกาศก่อนหน้าของแต่ละธนาคาร · แถวที่มีการเปลี่ยนแปลงจะถูกไฮไลต์</p>
+
+<div class="toolbar">
+  <button id="run-all" class="btn primary">▶ รันเปรียบเทียบอัตราทันที</button>
+  <span id="run-status" class="status-pill idle">พร้อมทำงาน</span>
+</div>
+<div id="run-output" class="output-box" style="display:none"></div>
+
+{% for item in banks %}
+  {% set bank = item.bank %}
+  <div class="bank-card">
+    <div class="bank-head">
+      <div class="bank-title">
+        {{ bank.name }} <span class="code">({{ bank.code }})</span>
+        {% if not item.has_data %}<span class="badge nodata">ยังไม่มีข้อมูล</span>{% endif %}
+        {% if not bank.enabled %}<span class="badge nodata">ปิดใช้งาน</span>{% endif %}
+      </div>
+      {% if item.has_data %}
+      <div class="bank-meta">
+        มีผล: <b>{{ item.effective_date or '-' }}</b>
+        {% if item.prev_date %} · ก่อนหน้า: {{ item.prev_date }}{% endif %}<br>
+        ตรวจล่าสุด: {{ item.last_checked or '-' }}
+        · <a class="link" href="/bank/{{ bank.code }}">รายละเอียด →</a>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if item.has_data %}
+    <table class="rates">
+      <thead>
+        <tr>
+          <th>ประเภท</th>
+          <th class="num">อัตราปัจจุบัน</th>
+          <th class="num">อัตราก่อนหน้า</th>
+          <th class="num">เปลี่ยนแปลง</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in item.rows %}
+        <tr class="{{ 'changed' if r.changed else '' }}">
+          <td>{{ r.label }}</td>
+          <td class="num">{{ (r.current ~ '%') if r.current is not none else '-' }}</td>
+          <td class="num">{{ (r.previous ~ '%') if r.previous is not none else '-' }}</td>
+          <td class="num">
+            {% if r.change is none %}<span class="chg flat">-</span>
+            {% elif r.change > 0 %}<span class="chg up">▲ +{{ '%.2f'|format(r.change) }}%</span>
+            {% elif r.change < 0 %}<span class="chg down">▼ {{ '%.2f'|format(r.change) }}%</span>
+            {% else %}<span class="chg flat">0.00%</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">ยังไม่มีไฟล์ CSV สำหรับธนาคารนี้ — กด "รันเปรียบเทียบอัตราทันที" เพื่อดึงข้อมูลครั้งแรก (ต้องเปิดใช้งานและตั้งค่า URL ในหน้าจัดการอัตรา)</div>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="bank-card"><div class="empty">ยังไม่มีธนาคารใน config</div></div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/run.js"></script>
+<script src="/static/js/overview.js"></script>
+{% endblock %}

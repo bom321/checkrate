@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Log — CheckRate{% endblock %}
+{% block content %}
+<h1>Log &amp; การรันตรวจสอบ</h1>
+<p class="page-desc">ดู log ล่าสุด กรองตาม level/ธนาคาร · รันตรวจสอบทันที หรือทดสอบส่งอีเมล</p>
+
+<div class="toolbar">
+  <button id="run-all" class="btn primary">▶ รันตรวจสอบทันที (ทุกธนาคาร)</button>
+  <button id="test-email" class="btn">✉️ ทดสอบส่งอีเมล</button>
+  <span id="run-status" class="status-pill idle">พร้อมทำงาน</span>
+</div>
+<div id="run-output" class="output-box" style="display:none"></div>
+
+<div class="filters">
+  <label>Level
+    <select id="f-level">
+      <option value="">ทั้งหมด</option>
+      <option>INFO</option><option>WARNING</option><option>ERROR</option><option>DEBUG</option>
+    </select>
+  </label>
+  <label>ธนาคาร
+    <select id="f-bank">
+      <option value="">ทั้งหมด</option>
+      {% for c in banks %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>แสดง
+    <select id="f-lines">
+      <option value="200">200 บรรทัด</option>
+      <option value="500" selected>500 บรรทัด</option>
+      <option value="2000">2000 บรรทัด</option>
+    </select>
+  </label>
+  <button id="refresh-logs" class="btn small">รีเฟรช</button>
+  <label class="switch"><input type="checkbox" id="auto-refresh"> auto-refresh ทุก 10 วิ</label>
+</div>
+
+<div id="log-console" class="log-console">กำลังโหลด...</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/run.js"></script>
+<script src="/static/js/logs.js"></script>
+{% endblock %}

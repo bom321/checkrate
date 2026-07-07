@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}จัดการอัตรา — CheckRate{% endblock %}
+{% block content %}
+<h1>จัดการอัตราที่ติดตาม</h1>
+<p class="page-desc">เพิ่ม/ลบ/แก้อัตราที่ติดตาม (กำหนด key และชื่อย่อ/alias เอง) · เปิด-ปิดธนาคาร · แก้ลิงก์ดาวน์โหลดเอกสาร · ตั้งผู้รับอีเมล</p>
+
+<div id="msg"></div>
+
+<div class="cfg-bank">
+  <div class="cfg-field">
+    <label>ผู้รับอีเมล (คั่นหลายคนด้วยเครื่องหมายจุลภาค , )</label>
+    <input type="text" id="email-to" placeholder="name@example.com, other@example.com">
+  </div>
+  <button id="save-settings" class="btn small">บันทึกผู้รับอีเมล</button>
+</div>
+
+<div id="banks-container"></div>
+
+<div class="toolbar" style="margin-top:20px">
+  <button id="save-config" class="btn primary">💾 บันทึกการตั้งค่าธนาคาร</button>
+  <button id="reload-config" class="btn">โหลดใหม่ (ยกเลิกการแก้ไข)</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/config.js"></script>
+{% endblock %}

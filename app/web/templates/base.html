@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}CheckRate — ติดตามอัตราดอกเบี้ยเงินฝาก{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/fonts.css">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">💰 CheckRate <span class="subtitle">ติดตามอัตราดอกเบี้ยเงินฝาก</span></div>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if active=='overview' else '' }}">ภาพรวม</a>
+      <a href="/config" class="{{ 'active' if active=='config' else '' }}">จัดการอัตรา</a>
+      <a href="/logs" class="{{ 'active' if active=='logs' else '' }}">Log &amp; รัน</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    CheckRate · เวลาเซิร์ฟเวอร์ {{ ''|default('') }}<span id="clock"></span>
+  </footer>
+  <script>
+    // นาฬิกา footer
+    (function () {
+      var el = document.getElementById('clock');
+      function tick(){ if(el) el.textContent = new Date().toLocaleString('th-TH'); }
+      tick(); setInterval(tick, 1000);
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

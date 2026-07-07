@@ -1,0 +1,8 @@
+# crontab สำหรับ supercronic — รันในโซนเวลา Asia/Bangkok (ตั้งผ่าน ENV TZ ใน Dockerfile)
+# รูปแบบเหมือน cron ปกติ: นาที ชั่วโมง วันที่ เดือน วันในสัปดาห์  คำสั่ง
+#
+# ตัวอย่าง: รันตรวจสอบทุกวัน เวลา 09:00 น.
+0 9 * * * cd /app && python -m app.monitor.rate_monitor >> /data/cron.log 2>&1
+
+# ต้องการรันถี่ขึ้น (เช่น ทุก 6 ชั่วโมง) ให้ comment บรรทัดบนแล้วเปิดบรรทัดนี้แทน:
+# 0 */6 * * * cd /app && python -m app.monitor.rate_monitor >> /data/cron.log 2>&1

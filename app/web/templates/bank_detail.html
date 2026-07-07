@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ bank.code }} — CheckRate{% endblock %}
+{% block content %}
+<p><a class="link" href="/">← กลับหน้าภาพรวม</a></p>
+<h1>{{ bank.name }} <span style="color:var(--brand)">({{ bank.code }})</span></h1>
+<p class="page-desc">แนวโน้มอัตราดอกเบี้ยย้อนหลัง · ตรวจล่าสุด {{ last_checked or '-' }}</p>
+
+<div class="toolbar">
+  <button id="run-bank" class="btn primary" data-code="{{ bank.code }}">▶ รันตรวจสอบธนาคารนี้</button>
+  <span id="run-status" class="status-pill idle">พร้อมทำงาน</span>
+</div>
+<div id="run-output" class="output-box" style="display:none"></div>
+
+{% if has_data %}
+<div class="chart-wrap">
+  <div class="chart-box"><canvas id="trend"></canvas></div>
+</div>
+
+<div class="bank-card">
+  <div class="bank-head"><div class="bank-title">ประวัติการประกาศ</div></div>
+  <div style="overflow-x:auto">
+  <table class="rates">
+    <thead>
+      <tr>
+        <th>วันมีผล</th>
+        {% for t in targets %}<th class="num">{{ t.alias or t.label or t.key }}</th>{% endfor %}
+        <th>PDF</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in hist_rows %}
+      <tr>
+        <td>{{ row.effective_date }}</td>
+        {% for c in row.cells %}
+        <td class="num">
+          {{ (c.rate ~ '%') if c.rate is not none else '-' }}
+          {% if c.change and c.change not in ('0.00', '') %}
+            <span class="chg {{ 'up' if c.change.startswith('+') else 'down' }}">({{ c.change }})</span>
+          {% endif %}
+        </td>
+        {% endfor %}
+        <td>{% if row.pdf %}<a class="link" href="/pdf/{{ bank.code }}/{{ row.pdf }}" target="_blank">เปิด PDF</a>{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% else %}
+<div class="bank-card"><div class="empty">ยังไม่มีข้อมูลประวัติสำหรับธนาคารนี้</div></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/js/run.js"></script>
+<script id="chart-data" type="application/json">
+{"labels": {{ chart_labels|tojson }}, "datasets": {{ chart_datasets|tojson }}}
+</script>
+<script src="/static/js/detail.js"></script>
+{% endblock %}

@@ -138,7 +138,8 @@ def verify_otp(email_raw: str, code_raw: str) -> bool:
 
 # ─────────────────────────── Dependencies บังคับสิทธิ์ ───────────────────────────
 def is_admin(request: Request) -> bool:
-    return bool(request.session.get("admin_email"))
+    email = request.session.get("admin_email")
+    return bool(email) and email in _admin_emails()
 
 
 class LoginRequired(Exception):

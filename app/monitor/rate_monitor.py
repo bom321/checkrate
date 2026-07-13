@@ -25,7 +25,7 @@ from . import common
 from .common import (
     log, load_config, get_bank_paths, get_csv_headers,
     download_pdf, get_latest_csv_row, get_prev_rates, append_to_csv,
-    check_warnings, write_result, send_email,
+    check_warnings, write_result, send_email, bank_log_context,
     build_new_rates_email, build_error_email, build_test_email,
 )
 from . import banks
@@ -108,6 +108,13 @@ def initialize_if_needed(bank: dict, pdf_dir: str, csv_path: str):
     log.info(f"[{bank['code']}] Baseline loaded: {eff_date}  {summary}")
 
 # ─────────────────────────── Per-Bank Workflow ───────────────────────────
+def _with_bank(fn, bank: dict, *args):
+    """เรียกงานของธนาคารหนึ่งภายใต้ bank_log_context — log ทุกบรรทัดที่เกิดข้างใน
+    (รวมถึงใน common.py และ banks/*.py ที่ไม่ได้ใส่แท็กเอง) จะได้ [CODE] กำกับเสมอ"""
+    with bank_log_context(bank["code"]):
+        return fn(bank, *args)
+
+
 def run_bank(bank: dict):
     code     = bank["code"]
     targets  = bank["rate_targets"]
@@ -285,7 +292,7 @@ def main(only: set[str] | None = None):
         return
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = {ex.submit(run_bank, bank): bank["code"] for bank in banks_list}
+        futures = {ex.submit(_with_bank, run_bank, bank): bank["code"] for bank in banks_list}
         for fut in as_completed(futures):
             code = futures[fut]
             try:
@@ -312,17 +319,18 @@ if __name__ == "__main__":
     elif "--backfill" in argv:
         only = _parse_only_arg(argv)
         for bank in _filter_only(load_config(enabled_only=True), only):
-            backfill_bank(bank)
+            _with_bank(backfill_bank, bank)
     elif "--discover-year" in argv:
         only = _parse_only_arg(argv)
         for bank in _filter_only(load_config(enabled_only=True), only):
             code = bank["code"]
-            saved = banks.discover_year(bank)
-            if saved is None:
-                log.info(f"[{code}] ไม่รองรับการค้นหาประวัติทั้งปีแบบละเอียด")
-                continue
-            log.info(f"[{code}] พบไฟล์ใหม่ {len(saved)} ไฟล์: {', '.join(saved) or '-'}")
-            if saved:
-                backfill_bank(bank)  # rebuild CSV ให้รวมไฟล์ใหม่ที่เพิ่งดาวน์โหลดมา
+            with bank_log_context(code):
+                saved = banks.discover_year(bank)
+                if saved is None:
+                    log.info("ไม่รองรับการค้นหาประวัติทั้งปีแบบละเอียด")
+                    continue
+                log.info(f"พบไฟล์ใหม่ {len(saved)} ไฟล์: {', '.join(saved) or '-'}")
+                if saved:
+                    backfill_bank(bank)  # rebuild CSV ให้รวมไฟล์ใหม่ที่เพิ่งดาวน์โหลดมา
     else:
         main(only=_parse_only_arg(argv))

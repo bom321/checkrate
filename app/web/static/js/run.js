@@ -26,6 +26,42 @@
     if (polling) { clearInterval(polling); polling = null; }
   }
 
+  // ── สรุปผลการรันแบบสั้น + ลิงก์ไปหน้า Log ──
+  // ใช้ในหน้าที่ไม่โชว์ log เต็ม (overview, bank detail): หน้าพวกนี้รีโหลดตัวเองหลังรันเสร็จ
+  // เพื่ออัปเดตตัวเลข ผลการรันจึงต้องฝากข้าม reload ไว้ใน sessionStorage แล้วค่อยวาดตอนโหลดใหม่
+  // หน้า Log ไม่มี #run-notice (มี #run-output แทน) — ทั้งก้อนนี้จึงไม่ทำงานที่นั่น
+  const NOTICE_KEY = 'checkrate:last-run';
+
+  function renderNotice() {
+    const box = document.getElementById('run-notice');
+    if (!box) return;
+    let job;
+    try {
+      job = JSON.parse(sessionStorage.getItem(NOTICE_KEY) || 'null');
+    } catch (e) {
+      job = null;
+    }
+    sessionStorage.removeItem(NOTICE_KEY);
+    if (!job) return;
+
+    const ok = job.returncode === 0;
+    box.innerHTML =
+      '<div class="notice ' + (ok ? 'ok' : 'err') + '">' +
+      (ok ? '✓ รันตรวจสอบเสร็จแล้ว — ข้อมูลด้านล่างอัปเดตล่าสุดแล้ว'
+          : '✗ การรันล้มเหลว (code ' + job.returncode + ')') +
+      ' · <a class="link" href="/logs">ดูรายละเอียดในหน้า Log →</a></div>';
+  }
+
+  if (document.getElementById('run-notice')) {
+    window.addEventListener('checkrate:run-finished', (e) => {
+      try {
+        sessionStorage.setItem(NOTICE_KEY, JSON.stringify({ returncode: (e.detail || {}).returncode }));
+      } catch (err) { /* sessionStorage ใช้ไม่ได้ก็แค่ไม่มีสรุปผล ไม่ต้องพัง */ }
+      setTimeout(() => location.reload(), 800);
+    });
+    renderNotice();
+  }
+
   async function poll() {
     try {
       const res = await fetch('/api/run/status');

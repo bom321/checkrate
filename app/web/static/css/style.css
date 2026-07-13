@@ -1,17 +1,28 @@
+/* palette "Editorial Calm" (mockup 2a) — พื้นครีม · header ดำ · accent เขียว */
 :root {
-  --bg: #f4f6fb;
+  --bg: #EDEBE5;
+  --surface: #F7F6F3;
   --card: #ffffff;
-  --ink: #1f2733;
-  --muted: #6b7686;
-  --line: #e3e8f0;
-  --brand: #2563eb;
-  --brand-ink: #1e40af;
-  --up: #16a34a;
-  --down: #dc2626;
-  --hl: #fff7ed;
-  --hl-line: #fdba74;
-  --shadow: 0 1px 3px rgba(20,30,55,.08), 0 1px 2px rgba(20,30,55,.06);
-  font-family: 'Noto Sans Thai', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --ink: #17181C;
+  --muted: #8A8D93;
+  --muted-soft: #B0B3B9;
+  --line: #EAE7E1;
+  --line-strong: #E0DDD6;
+  --brand: #1E8E5A;
+  --brand-ink: #17714A;
+  --brand-soft: #E9F4EE;
+  --up: #1E8E5A;
+  --down: #C0432E;
+  --down-soft: #FBECE8;
+  --warn: #B7791F;
+  --warn-soft: #FBF1E8;
+  --topbar: #14151A;
+  --hl: #FBF7EF;
+  --hl-line: #E3C99B;
+  --shadow: 0 1px 3px rgba(23,24,28,.06), 0 1px 2px rgba(23,24,28,.04);
+  --sans: 'IBM Plex Sans Thai', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--sans);
 }
 
 * { box-sizing: border-box; }
@@ -19,90 +30,57 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: 'Noto Sans Thai', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: var(--sans);
   font-size: 15px;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ── Topbar ── */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; flex-wrap: wrap;
-  background: var(--card);
-  border-bottom: 1px solid var(--line);
-  padding: 12px 24px;
+  background: var(--topbar);
+  padding: 13px 32px;
   position: sticky; top: 0; z-index: 10;
-  box-shadow: var(--shadow);
+  box-shadow: 0 6px 18px -12px rgba(0,0,0,.5);
 }
-.brand { font-size: 20px; font-weight: 600; }
-.brand .subtitle { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand-mark {
+  width: 28px; height: 28px; flex: none; border-radius: 8px;
+  background: var(--brand); color: #fff;
+  font: 600 13px var(--mono); display: flex; align-items: center; justify-content: center;
+}
+.brand-name { font-size: 16px; font-weight: 600; color: #F4F3EF; letter-spacing: -.01em; }
+.brand .subtitle { font-size: 12.5px; color: #797D85; font-weight: 400; }
 .nav a {
-  color: var(--muted); text-decoration: none; font-weight: 600;
-  padding: 8px 12px; border-radius: 8px; margin-left: 4px;
+  color: #9DA0A6; text-decoration: none; font-weight: 500; font-size: 13.5px;
+  padding: 8px 14px; border-radius: 9px; margin-left: 2px;
 }
-.nav a:hover { background: var(--bg); color: var(--ink); }
-.nav a.active { color: var(--brand); background: #eef2ff; }
+.nav a:hover { background: rgba(255,255,255,.07); color: #E8E7E3; }
+.nav a.active { color: #fff; background: rgba(255,255,255,.13); }
 
-.container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+.container { max-width: 1160px; margin: 0 auto; padding: 32px 24px 24px; }
 .footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; }
 
-/* ── Cards / bank tables ── */
+/* ── หัวหน้าเพจ ── */
 h1 { font-size: 22px; margin: 0 0 4px; }
 .page-desc { color: var(--muted); margin: 0 0 20px; }
 
-.bank-card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-  box-shadow: var(--shadow); margin-bottom: 20px; overflow: hidden;
+/* หัวเพจแบบมีปุ่มชิดขวา (config / logs) */
+.pg-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap; margin-bottom: 20px;
 }
-.bank-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--line);
-}
-.bank-title { font-size: 17px; font-weight: 600; }
-.bank-title .code { color: var(--brand); }
-.bank-meta { font-size: 12.5px; color: var(--muted); text-align: right; }
-.bank-meta b { color: var(--ink); }
-
-/* กลุ่มไฟล์รายปี — พับ/กางได้ */
-details.year-group > summary { cursor: pointer; list-style: none; user-select: none; }
-details.year-group > summary::-webkit-details-marker { display: none; }
-details.year-group > summary:hover { background: var(--bg); }
-details.year-group:not([open]) > summary { border-bottom: none; }
-details.year-group .year-chevron { color: var(--muted); font-size: 13px; transition: transform .15s; }
-details.year-group:not([open]) .year-chevron { transform: rotate(-90deg); }
-
-table.rates { width: 100%; border-collapse: collapse; }
-table.rates th, table.rates td { padding: 10px 18px; text-align: left; }
-table.rates thead th {
-  font-size: 12px; text-transform: uppercase; letter-spacing: .03em;
-  color: var(--muted); background: #fbfcfe; border-bottom: 1px solid var(--line);
-}
-table.rates thead th .col-date {
-  display: inline-block; margin-top: 2px; text-transform: none;
-  font-size: 11px; font-weight: 400; letter-spacing: normal; color: var(--muted); opacity: .85;
-}
-table.rates td.num, table.rates th.num { text-align: right; font-variant-numeric: tabular-nums; }
-table.rates tbody tr { border-bottom: 1px solid var(--line); }
-table.rates tbody tr:last-child { border-bottom: none; }
-tr.changed { background: var(--hl); box-shadow: inset 3px 0 0 var(--hl-line); }
-
-.chg { font-weight: 600; }
-.chg.up { color: var(--up); }
-.chg.down { color: var(--down); }
-.chg.flat { color: var(--muted); }
-.badge {
-  display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  background: #eef2ff; color: var(--brand-ink); font-weight: 600;
-}
-.badge.nodata { background: #f1f5f9; color: var(--muted); }
-.badge.up { background: #dcfce7; color: #166534; }
-.badge.down { background: #fee2e2; color: #991b1b; }
+.pg-head h1 { font-size: 23px; letter-spacing: -.01em; }
+.pg-head .page-desc { margin: 5px 0 0; font-size: 13px; max-width: 66ch; line-height: 1.5; }
+.pg-head-actions { display: flex; gap: 10px; flex: none; }
 
 .empty { padding: 18px; color: var(--muted); }
 
 /* ── Buttons ── */
 .btn {
-  font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
   border: 1px solid var(--line); background: var(--card); color: var(--ink);
   padding: 9px 16px; border-radius: 9px;
 }
@@ -116,57 +94,631 @@ tr.changed { background: var(--hl); box-shadow: inset 3px 0 0 var(--hl-line); }
 a.link { color: var(--brand); text-decoration: none; font-weight: 600; }
 a.link:hover { text-decoration: underline; }
 
-/* ── Detail chart ── */
-.chart-wrap { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-  box-shadow: var(--shadow); padding: 18px; margin-bottom: 20px; }
-.chart-box { position: relative; height: 340px; }
+/* ── การ์ด "แนวโน้มย้อนหลัง" (เส้น/แกน/ป้าย วาดเป็น SVG ใน detail.js) ── */
+.bd-trend { margin-bottom: 14px; }
+.bd-trend .ov-panel-head { align-items: flex-start; padding: 16px 22px; }
+.bd-trend-sub { font-size: 11.5px; font-weight: 400; color: var(--muted-soft); margin-top: 2px; }
+.bd-trend-badge { font-size: 11.5px; font-weight: 500; padding: 6px 12px; border-radius: 20px; white-space: nowrap; }
+.bd-trend-badge.down { background: var(--down-soft); color: var(--down); }
+.bd-trend-badge.up { background: var(--brand-soft); color: var(--brand); }
+.bd-trend-badge.mixed { background: var(--warn-soft); color: var(--warn); }
+.bd-trend-legend {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px;
+  padding: 13px 22px 4px; font-size: 11.5px; font-weight: 500; color: #5C5F65;
+}
+.bd-trend-legend .item { display: flex; align-items: center; gap: 7px; }
+.bd-trend-legend .sw { width: 18px; height: 3px; border-radius: 2px; }
+.bd-trend-legend .unit { margin-left: auto; font-weight: 400; font-size: 11px; color: var(--muted-soft); letter-spacing: .02em; }
+.bd-trend-body { padding: 4px 22px 20px; }
+.bd-trend-svg { width: 100%; height: auto; display: block; font-family: var(--sans); }
 
-/* ── Config ── */
-.cfg-bank { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-  box-shadow: var(--shadow); margin-bottom: 18px; padding: 16px 18px; }
-.cfg-row { display: grid; grid-template-columns: 1fr 1.3fr 1.1fr 1.1fr 70px 70px 1.2fr 32px; gap: 8px;
-  align-items: center; margin-bottom: 6px; }
-.cfg-row.head { font-size: 12px; color: var(--muted); text-transform: uppercase; }
-.cfg-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
-.cfg-field label { font-size: 12px; color: var(--muted); }
+/* ── ฟอร์ม ── */
 input[type=text], input[type=number], input[type=url], textarea, select {
   font-family: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--line);
   border-radius: 8px; background: #fff; color: var(--ink); width: 100%;
 }
-input:focus, textarea:focus, select:focus { outline: 2px solid #bfdbfe; border-color: var(--brand); }
-.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-color: var(--brand); }
 
-/* ── Logs ── */
-.log-console {
-  background: #0f172a; color: #cbd5e1; border-radius: 12px; padding: 14px 16px;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
-  line-height: 1.55; height: 460px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+/* toggle เปิด-ปิด (สวิตช์เลื่อน) — checkbox จริงซ่อนอยู่ข้างใต้ JS จึงอ่าน .checked ได้ตามเดิม */
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track {
+  width: 34px; height: 20px; flex: none; border-radius: 20px; background: var(--line-strong);
+  position: relative; display: inline-block; transition: background .15s;
 }
-.log-line .lvl { font-weight: 700; }
-.log-line .lvl.INFO { color: #38bdf8; }
-.log-line .lvl.WARNING { color: #fbbf24; }
-.log-line .lvl.ERROR { color: #f87171; }
-.log-line .lvl.DEBUG { color: #94a3b8; }
-.log-line .ts { color: #64748b; }
+.switch-knob {
+  position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .15s;
+}
+.switch input:checked + .switch-track { background: var(--brand); }
+.switch input:checked + .switch-track .switch-knob { transform: translateX(14px); }
+.switch input:focus-visible + .switch-track { outline: 2px solid #BEE3CE; outline-offset: 2px; }
+.switch-text { color: #3C3F45; }
+.cfg-bank.off .switch-text { color: var(--muted); }
+/* checkbox ธรรมดา (auto-refresh) — ไม่ต้องเป็นสวิตช์ */
+.switch.plain { font-size: 12.5px; font-weight: 400; color: #6E7178; gap: 6px; }
+.switch.plain input { position: static; opacity: 1; width: auto; height: auto; }
+
+.notice { padding: 10px 14px; border-radius: 10px; margin: 10px 0; font-size: 13.5px; }
+.notice.ok { background: var(--brand-soft); color: var(--brand-ink); }
+.notice.err { background: var(--down-soft); color: var(--down); }
+
+
+/* ══════════════ จัดการอัตรา (mockup 6b) ══════════════ */
+
+/* ผู้รับอีเมล */
+.cfg-email {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px 20px; margin-bottom: 14px;
+}
+.cfg-email-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.cfg-email-title { font-size: 12.5px; font-weight: 600; color: #3C3F45; }
+.cfg-email-hint { font-size: 11px; color: var(--muted); }
+.cfg-email-row { display: flex; gap: 10px; }
+.cfg-email-row .btn { flex: none; }
+
+/* คำอธิบายช่องที่กรอกยาก */
+.cfg-legend {
+  background: #F3F1EC; border: 1px solid var(--line); border-radius: 12px;
+  padding: 13px 16px; margin-bottom: 22px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.cfg-legend-row { display: flex; gap: 10px; align-items: baseline; }
+.cfg-legend-row > span:last-child { font-size: 11.5px; color: #7A7D83; line-height: 1.55; }
+.cfg-legend-chip {
+  flex: none; width: 122px; text-align: center;
+  font-size: 10.5px; font-weight: 600; color: #5C5F65;
+  background: #E4E0D8; padding: 3px 8px; border-radius: 5px;
+}
+
+.cfg-banks-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
+}
+.cfg-banks-title { font-size: 13px; font-weight: 600; color: #3C3F45; }
+.cfg-banks-count { font-size: 11.5px; color: var(--muted); }
+
+/* การ์ดธนาคาร — พับ/กางได้ */
+.cfg-bank {
+  background: var(--card); border: 1px solid #E4E1DA; border-radius: 16px;
+  box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden;
+}
+.cfg-bank.off { background: #FBFAF8; }
+.cfg-bank-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  padding: 15px 20px; cursor: pointer; user-select: none;
+}
+.cfg-bank.open .cfg-bank-head { border-bottom: 1px solid #F0EDE7; background: #FCFBF9; }
+.cfg-bank-ident { display: flex; align-items: center; gap: 13px; }
+.cfg-logo {
+  width: 34px; height: 34px; flex: none; border-radius: 9px; object-fit: contain;
+  background: var(--surface); border: 1px solid #E4E1DA;
+}
+.cfg-logo.mono {
+  display: flex; align-items: center; justify-content: center;
+  font: 600 13px var(--mono); color: var(--muted);
+}
+.cfg-bank.off .cfg-logo { opacity: .5; }
+.cfg-bank-name { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.cfg-bank.off .cfg-bank-name { color: var(--muted); }
+.cfg-code {
+  font: 600 10px var(--mono); color: #6E7178; background: #EEEBE4;
+  padding: 2px 7px; border-radius: 5px; letter-spacing: .05em;
+}
+.cfg-bank-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.cfg-bank-ctl { display: flex; align-items: center; gap: 16px; }
+.cfg-chevron {
+  border: none; background: none; cursor: pointer; padding: 4px;
+  color: var(--muted-soft); font-size: 12px; transition: transform .15s;
+}
+.cfg-bank:not(.open) .cfg-chevron { transform: rotate(-90deg); }
+
+.cfg-bank:not(.open) .cfg-bank-body { display: none; }
+
+/* ลิงก์เอกสาร */
+.cfg-urls {
+  padding: 16px 20px; border-bottom: 1px solid #F0EDE7;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 13px 16px;
+}
+.cfg-field { display: flex; flex-direction: column; gap: 6px; }
+.cfg-field.wide, .cfg-doc-link { grid-column: 1 / -1; }
+.cfg-field > span {
+  font-size: 10.5px; font-weight: 600; color: var(--muted); letter-spacing: .04em;
+}
+.cfg-field input { font-size: 12px; padding: 8px 10px; border-color: #E4E1DA; }
+.cfg-doc-link { font-size: 12px; }
+
+/* ตารางอัตราที่ติดตาม */
+.cfg-targets-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 15px 20px 11px;
+}
+.cfg-targets-title { font-size: 12px; font-weight: 600; color: #3C3F45; }
+.cfg-add {
+  border: 1px solid #CFE6DA; background: #F1F9F4; color: var(--brand);
+  font: 600 11.5px var(--sans); padding: 7px 13px; border-radius: 8px; cursor: pointer;
+}
+.cfg-add:hover { background: var(--brand-soft); }
+
+.cfg-table { padding: 0 12px 14px; }
+.cfg-table-inner { border: 1px solid #EDEAE3; border-radius: 12px; overflow: hidden; }
+.cfg-t-row {
+  display: grid; grid-template-columns: 1.05fr 1.25fr 1.25fr .95fr .55fr .6fr 1.4fr 30px;
+  gap: 10px; align-items: center; padding: 9px 14px; background: var(--card);
+}
+.cfg-t-head {
+  padding: 11px 14px; background: #F4F1EB;
+  font-size: 10.5px; font-weight: 600; color: var(--muted); letter-spacing: .02em;
+}
+.cfg-t-head .num { text-align: center; }
+.targets-list .cfg-t-row { border-top: 1px solid #F0EDE7; }
+.targets-list .cfg-t-row:nth-child(even) { background: #FBFAF8; }
+.cfg-t-cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.cfg-t-lab { display: none; font-size: 10.5px; font-weight: 600; color: var(--muted); }
+.cfg-t-row input {
+  min-width: 0; font-size: 12px; padding: 7px 9px; border-radius: 7px; border-color: #E4E1DA;
+}
+.cfg-t-row input.num { text-align: center; }
+.cfg-t-row .t-key { background: var(--surface); color: #3C3F45; }
+.cfg-t-del {
+  border: none; background: none; color: var(--down); font-size: 15px;
+  cursor: pointer; padding: 4px; border-radius: 6px; justify-self: center;
+}
+.cfg-t-del:hover { background: var(--down-soft); }
+.cfg-t-empty { padding: 14px; font-size: 12.5px; color: var(--muted-soft); text-align: center; }
+
+
+/* ══════════════ Log & รันตรวจสอบ (mockup 6a) ══════════════ */
+.lg-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
+}
+.lg-actions .status-pill { margin-left: auto; }
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 600; padding: 8px 14px; border-radius: 20px;
+}
+.status-pill::before {
+  content: ''; width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor;
+}
+.status-pill.idle { background: var(--brand-soft); color: var(--brand); }
+.status-pill.running { background: var(--warn-soft); color: var(--warn); }
+.status-pill.ok { background: var(--brand-soft); color: var(--brand-ink); }
+.status-pill.err { background: var(--down-soft); color: var(--down); }
+
+/* คอนโซลผลการรัน — เทอร์มินัลดำ */
+.output-box {
+  background: var(--topbar); color: #B9DFC7; border-radius: 12px; padding: 16px 18px;
+  font-size: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+  margin-bottom: 20px; max-height: 200px; overflow-y: auto;
+}
+
 .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 .filters select, .filters input { width: auto; }
-
-.output-box {
-  background: #0f172a; color: #cbd5e1; border-radius: 10px; padding: 12px 14px;
-  font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; white-space: pre-wrap;
-  margin-top: 12px; max-height: 260px; overflow: auto;
+.f-sel {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 500; color: #6E7178;
 }
-.status-pill { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
-.status-pill.idle { background: #f1f5f9; color: var(--muted); }
-.status-pill.running { background: #fef9c3; color: #854d0e; }
-.status-pill.ok { background: #dcfce7; color: #166534; }
-.status-pill.err { background: #fee2e2; color: #991b1b; }
-.notice { padding: 10px 14px; border-radius: 10px; margin: 10px 0; font-size: 13.5px; }
-.notice.ok { background: #dcfce7; color: #166534; }
-.notice.err { background: #fee2e2; color: #991b1b; }
+.f-sel select {
+  font-size: 12.5px; font-weight: 500; padding: 8px 12px;
+  border-radius: 8px; border: 1px solid var(--line-strong); color: #3C3F45;
+}
 
+/* รายการ log — การ์ดขาว ไฮไลต์ level ด้วยสี */
+.lg-panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.lg-panel-head {
+  padding: 12px 18px; border-bottom: 1px solid var(--line);
+  font-size: 12px; font-weight: 600; color: #3C3F45;
+}
+.log-console {
+  padding: 14px 18px; font-size: 12px; line-height: 1.9;
+  height: 460px; overflow: auto; color: var(--muted);
+}
+.log-line { display: flex; gap: 10px; align-items: baseline; }
+.log-line .ts {
+  flex: none; color: var(--muted-soft); font-variant-numeric: tabular-nums;
+}
+.log-line .lvl { flex: none; min-width: 62px; font-weight: 600; }
+.log-line .lvl.INFO { color: var(--brand); }
+.log-line .lvl.WARNING { color: var(--warn); }
+.log-line .lvl.ERROR { color: var(--down); }
+.log-line .lvl.DEBUG { color: var(--muted-soft); }
+.log-line .msg { color: #3C3F45; word-break: break-word; }
+
+
+/* ══════════════ แถบเมนูล่าง (มือถือ) ══════════════ */
+.botnav { display: none; }
+
+
+/* ══════════════ Overview (mockup 2a) ══════════════ */
+
+/* hero */
+.ov-hero {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 28px; flex-wrap: wrap; margin-bottom: 28px;
+}
+.ov-hero-meta { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.ov-hero h1 {
+  font-size: 42px; font-weight: 300; line-height: 1.06; letter-spacing: -.02em;
+  margin: 0;
+}
+.ov-hero h1 b { font-weight: 600; }
+.ov-hero h1 b.accent { color: var(--brand); }
+.ov-hero-actions { display: flex; align-items: center; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.ov-hero-actions .btn.primary { display: inline-flex; align-items: center; gap: 7px; }
+.btn-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #8FE3B5; }
+
+.ov-kpis { display: flex; gap: 30px; padding-bottom: 6px; flex-wrap: wrap; }
+.ov-kpi + .ov-kpi { border-left: 1px solid var(--line-strong); padding-left: 30px; }
+.ov-kpi-num {
+  font-size: 34px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums;
+}
+.ov-kpi-num span { font-size: 16px; font-weight: 400; color: var(--muted); }
+.ov-kpi-num.up { color: var(--up); }
+.ov-kpi-num.down { color: var(--down); }
+.ov-kpi-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+/* การ์ดธนาคาร */
+.ov-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 16px; margin-bottom: 24px;
+}
+.ov-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 18px; display: flex; flex-direction: column;
+  text-decoration: none; color: inherit;
+}
+.ov-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
+.ov-bank { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.ov-logo {
+  width: 30px; height: 30px; flex: none; border-radius: 8px; object-fit: contain;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.ov-logo.mono {
+  display: flex; align-items: center; justify-content: center;
+  font: 600 12px var(--mono); color: var(--muted);
+}
+/* สีประจำธนาคาร — ธนาคารที่ไม่ได้ระบุไว้ตกไปใช้ var(--surface) ตามค่าตั้งต้นของ .ov-logo */
+.ov-logo[data-code="SCB"]   { background: #F1EDF6; }
+.ov-logo[data-code="KBANK"] { background: #E7F4EC; }
+.ov-logo[data-code="KTB"]   { background: #E7F0F9; }
+.ov-logo[data-code="BBL"]   { background: #E6EDF5; }
+.ov-bank-name { font-size: 14.5px; font-weight: 600; line-height: 1.3; }
+.ov-bank-code { font: 500 10.5px var(--mono); color: var(--muted-soft); letter-spacing: .04em; }
+.ov-card-cap { font-size: 12.5px; font-weight: 500; color: #6E7178; }
+.ov-card-big { display: flex; align-items: flex-end; gap: 6px; margin-top: 2px; }
+.ov-card-big b {
+  font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+}
+.ov-card-big span { font-size: 14px; color: var(--muted); padding-bottom: 4px; }
+.ov-card-big.zero b { color: var(--muted-soft); }
+.ov-mini { display: flex; gap: 8px; margin-top: 14px; }
+.ov-mini > div { flex: 1; background: var(--surface); border-radius: 9px; padding: 9px 10px; }
+.ov-mini-label { font-size: 11px; font-weight: 500; color: var(--muted); }
+.ov-mini-num { font-size: 17px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.ov-mini-num span { font-size: 12px; font-weight: 400; color: var(--muted-soft); }
+.ov-mini-num.zero { color: var(--muted-soft); }
+.ov-updown { margin-top: 3px; font: 600 15px var(--mono); font-variant-numeric: tabular-nums; }
+.ov-updown .u { color: var(--up); }
+.ov-updown .d { color: var(--down); }
+.ov-updown .off { color: var(--muted-soft); }
+.ov-updown.flat { font: 500 13.5px var(--sans); color: var(--muted-soft); margin-top: 4px; }
+.ov-card-foot { margin-top: auto; padding-top: 12px; font-size: 12px; font-weight: 500; color: var(--muted); }
+
+/* ตารางสรุปรายธนาคาร */
+.ov-panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.ov-panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  padding: 15px 22px; border-bottom: 1px solid var(--line);
+}
+.ov-panel-title { font-size: 15px; font-weight: 600; }
+.ov-months { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ov-months a {
+  font-size: 11.5px; font-weight: 500; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--line-strong); background: var(--card); color: #5C5F65; text-decoration: none;
+}
+.ov-months a:hover { background: var(--surface); }
+.ov-months a.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.ov-months select {
+  width: auto; font-size: 11.5px; font-weight: 500; padding: 6px 12px;
+  border-radius: 8px; border: 1px solid var(--line-strong); color: #5C5F65;
+  background: var(--card);
+}
+
+.ov-grid {
+  display: grid; grid-template-columns: 2.6fr 1fr 1fr .8fr 1fr; gap: 14px; align-items: center;
+}
+.ov-cols {
+  padding: 11px 22px; background: #F1EEE8; border-bottom: 1px solid var(--line-strong);
+  font-size: 11px; font-weight: 600; color: #4E5157;
+}
+.ov-cols .r { text-align: right; }
+.ov-cols .c { text-align: center; }
+.ov-group {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 11px 22px; background: #FBFAF8;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.ov-group:first-of-type { border-top: none; }
+.ov-group-bank { display: flex; align-items: center; gap: 10px; }
+.ov-group-bank .ov-logo { width: 24px; height: 24px; border-radius: 6px; font-size: 10px; }
+.ov-group-bank a { font-size: 13.5px; font-weight: 600; color: var(--ink); text-decoration: none; }
+.ov-group-bank a:hover { color: var(--brand); }
+.ov-group-bank .code { font: 500 10px var(--sans); color: var(--muted-soft); letter-spacing: .04em; }
+.ov-pills { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ov-pill {
+  font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 20px;
+  background: #F2EFEA; color: #5C5F65;
+}
+.ov-pill.off { color: var(--muted-soft); }
+.ov-pill.up { background: var(--brand-soft); color: var(--brand); }
+.ov-pill.down { background: var(--down-soft); color: var(--down); }
+
+.ov-row { padding: 13px 22px 13px 34px; border-bottom: 1px solid #F5F2EC; }
+.ov-row:last-child { border-bottom: none; }
+.ov-prod { display: flex; flex-direction: column; gap: 3px; }
+.ov-prod-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+.ov-prod-sub { font-size: 11px; color: var(--muted-soft); }
+.ov-tag {
+  font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 20px;
+  background: var(--warn-soft); color: var(--warn);
+}
+.ov-num { text-align: right; font-variant-numeric: tabular-nums; }
+.ov-num.prev { font-size: 14px; color: var(--muted-soft); }
+.ov-num.cur { font-size: 14px; font-weight: 600; }
+.ov-times { text-align: center; font-size: 12px; color: var(--muted); }
+.ov-times.multi { font-weight: 600; color: var(--warn); }
+.ov-net { text-align: right; font-size: 13px; font-weight: 600; }
+.ov-net.up { color: var(--up); }
+.ov-net.down { color: var(--down); }
+.ov-net.flat { color: var(--muted-soft); }
+
+.ov-timeline {
+  margin-top: 11px; padding: 11px 14px; background: var(--surface);
+  border: 1px solid #EFECE7; border-radius: 10px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.ov-timeline-cap { font-size: 10px; font-weight: 500; color: var(--muted-soft); }
+.ov-tl-row {
+  display: flex; align-items: center; gap: 12px; font-variant-numeric: tabular-nums; font-size: 13px;
+}
+.ov-tl-row .date { font-size: 11.5px; font-weight: 500; color: var(--muted); min-width: 74px; }
+.ov-tl-row .from { color: var(--muted-soft); }
+.ov-tl-row .arrow { color: #C7C4BD; font-size: 12px; }
+.ov-tl-row .to { font-weight: 600; }
+.ov-tl-row .delta { margin-left: auto; font-size: 12px; font-weight: 600; }
+.ov-tl-row .delta.up { color: var(--up); }
+.ov-tl-row .delta.down { color: var(--down); }
+
+.ov-quiet { padding: 13px 22px 13px 34px; font-size: 12.5px; color: var(--muted-soft); }
+
+/* ธนาคารที่ปิดใช้งาน / ยังไม่มีข้อมูล */
+.ov-others {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 18px; font-size: 12.5px; color: var(--muted);
+}
+.ov-others .ov-pill { background: #E6E3DC; }
+
+
+/* ══════════════ Bank detail (mockup 5a) ══════════════ */
+.bd-crumb {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 20px;
+  font-size: 12.5px; font-weight: 500; color: var(--muted-soft);
+}
+.bd-crumb a { color: var(--muted); text-decoration: none; }
+.bd-crumb a:hover { color: var(--brand); }
+.bd-crumb .now { color: var(--ink); font-weight: 600; }
+
+.bd-profile {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap; margin: 22px 0 24px;
+}
+.bd-ident { display: flex; align-items: center; gap: 16px; }
+.bd-logo {
+  width: 58px; height: 58px; flex: none; border-radius: 14px; object-fit: contain;
+  background: var(--card); border: 1px solid var(--line);
+}
+/* หน้ารายละเอียดธนาคารใช้ sans ล้วนตาม design (5a) — ไม่มี mono ปนเหมือนหน้าอื่น */
+.bd-logo.mono {
+  display: flex; align-items: center; justify-content: center;
+  font: 600 22px var(--sans); color: var(--muted);
+}
+.bd-name { font-size: 26px; font-weight: 600; letter-spacing: -.01em; line-height: 1.25; }
+.bd-meta { margin-top: 3px; font: 400 12.5px var(--sans); color: var(--muted-soft); letter-spacing: .02em; }
+.bd-meta b { color: var(--down); font-weight: 600; }
+
+/* ประโยคสรุปเดือนนี้ — โชว์เฉพาะมือถือ (บน desktop ใช้ KPI การ์ดแทน) */
+.bd-hero {
+  display: none; font: 300 22px/1.35 var(--sans); color: var(--ink); letter-spacing: -.01em;
+  margin: 4px 0 20px;
+}
+.bd-hero b { font-weight: 600; }
+.bd-hero b.accent { color: var(--brand); }
+
+/* toolbar ของธนาคารนี้ — status pill ชิดขวาเสมอ (5a) */
+.toolbar .status-pill { margin-left: auto; }
+
+.bd-files-count { font-size: 12px; color: var(--muted-soft); }
+.bd-year { border-top: 1px solid var(--line); }
+.bd-year:first-of-type { border-top: none; }
+.bd-year > summary {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 22px; background: #FBFAF8; cursor: pointer; user-select: none;
+  list-style: none; font-size: 13px; font-weight: 600;
+}
+.bd-year > summary::-webkit-details-marker { display: none; }
+.bd-year > summary:hover { background: var(--surface); }
+.bd-year > summary .muted { font-weight: 400; color: var(--muted-soft); }
+.bd-year .year-chevron { color: var(--muted-soft); font-size: 12px; transition: transform .15s; }
+.bd-year:not([open]) .year-chevron { transform: rotate(-90deg); }
+
+.bd-file {
+  display: grid; grid-template-columns: 1fr 2.4fr 1fr .5fr; gap: 14px; align-items: center;
+  padding: 11px 22px; border-bottom: 1px solid #F5F2EC; font-size: 12.5px; color: #5C5F65;
+}
+/* บน desktop wrapper นี้ "หายไป" จาก box model — ลูกทั้ง 3 (วันที่/ชื่อ/ขนาด) เข้า grid 4 คอลัมน์ของ .bd-file ตรง ๆ เหมือนเดิม */
+.bd-file-info { display: contents; }
+.bd-file:last-child { border-bottom: none; }
+.bd-file-head { font-size: 10.5px; font-weight: 600; color: var(--muted-soft); padding: 9px 22px; }
+.bd-file .name { color: var(--ink); font-family: var(--sans); font-size: 12px; word-break: break-all; }
+.bd-file .size { text-align: right; color: var(--muted-soft); font-variant-numeric: tabular-nums; }
+.bd-file a { color: #5C5F65; text-decoration: none; font-size: 15px; }
+.bd-file a:hover { color: var(--brand); }
+
+/* ผลิตภัณฑ์เป็น <details> เพื่อรองรับทั้งตาราง (desktop) และการ์ดพับ/กาง (มือถือ) — detail.js สั่ง open ตาม breakpoint */
+.bd-rows summary.ov-grid { list-style: none; cursor: default; }
+.bd-rows summary.ov-grid::-webkit-details-marker { display: none; }
+.ov-chev, .ov-prod-sub-mob { display: none; }   /* มีความหมายเฉพาะบนมือถือ — ซ่อนไว้บน desktop */
+
+@media (min-width: 721px) {
+  /* desktop ให้ตรงกับ 5a เป๊ะ — กางไทม์ไลน์เฉพาะแถว "ประกาศซ้ำ" ไม่ใช่ทุกแถวที่เปลี่ยน */
+  .bd-rows .ov-row.once .ov-timeline { display: none; }
+}
+
+@media (max-width: 900px) {
+  .ov-hero h1 { font-size: 32px; }
+  .ov-kpis { gap: 20px; }
+  .ov-kpi + .ov-kpi { padding-left: 20px; }
+}
 @media (max-width: 720px) {
-  .cfg-row { grid-template-columns: 1fr; }
-  table.rates th, table.rates td { padding: 9px 12px; }
-  .container { padding: 16px; }
+  .container { padding: 20px 16px 92px; }   /* เผื่อที่ให้ .botnav ไม่ทับเนื้อหา */
+  .topbar { padding: 12px 16px; }
+  .brand .subtitle { display: none; }
+  .topbar .nav { display: none; }           /* ใช้ .botnav แทน */
+  .footer { padding-bottom: 8px; }
+
+  /* แถบเมนูล่าง */
+  .botnav {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    background: var(--topbar); padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 18px -10px rgba(0,0,0,.5);
+  }
+  .botnav a {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 8px 4px; border-radius: 10px; text-decoration: none;
+    font-size: 10.5px; font-weight: 500; color: #9DA0A6;
+  }
+  .botnav a.active { color: #fff; background: rgba(255,255,255,.13); }
+  .botnav-ic { font-size: 14px; line-height: 1; }
+
+  /* หัวเพจ: ปุ่มลงมาอยู่ใต้หัวข้อ */
+  .pg-head-actions { width: 100%; }
+  .pg-head-actions .btn { flex: 1; }
+
+  /* จัดการอัตรา (6d): ลิงก์เอกสารเรียงเดี่ยว · แถวอัตราคลี่เป็นการ์ดฟิลด์แนวตั้ง */
+  .cfg-legend-row { flex-direction: column; gap: 5px; }
+  .cfg-legend-chip { width: auto; text-align: left; }
+  .cfg-urls { grid-template-columns: 1fr; padding: 14px 16px; }
+  .cfg-bank-head, .cfg-targets-head { padding-left: 16px; padding-right: 16px; }
+  .cfg-table { padding: 0 10px 12px; }
+  .cfg-t-head { display: none; }
+  .cfg-t-row { grid-template-columns: 1fr; gap: 10px; padding: 14px 14px 14px; position: relative; }
+  .cfg-t-lab { display: block; }
+  .cfg-t-row input.num { text-align: left; }
+  .cfg-t-del { position: absolute; top: 10px; right: 10px; justify-self: end; }
+
+  /* Log (6c): ปุ่มเรียงเต็มแถว · ตัวกรองเลื่อนแนวนอน · log เป็นการ์ดต่อบรรทัด */
+  .lg-actions .btn { flex: 1 1 100%; }
+  .lg-actions .status-pill { margin-left: 0; }
+  .filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .filters > * { flex: none; }
+  .log-line {
+    flex-wrap: wrap; gap: 4px 8px; padding: 9px 0; border-bottom: 1px solid #F5F2EC;
+    line-height: 1.5;
+  }
+  .log-line .msg { order: 3; flex: 1 1 100%; }
+  .log-line .ts { order: 2; font-size: 11px; }
+  .log-line .lvl { order: 1; min-width: 0; font-size: 11px; }
+  .ov-hero h1 { font-size: 27px; }
+  /* KPI การ์ดเลื่อนแนวนอน (5b/4a) — ใช้ร่วมกันทั้งหน้าภาพรวมและรายละเอียดธนาคาร ตั้งใจ */
+  .ov-kpis {
+    flex-wrap: nowrap; overflow-x: auto; gap: 10px; margin: 0 -16px; padding: 0 16px 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ov-kpi {
+    flex: none; min-width: 104px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 13px;
+  }
+  .ov-kpi + .ov-kpi { border-left: none; padding-left: 13px; }
+  .ov-kpi-num { font-size: 24px; }
+  .ov-cards { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+
+  /* ตัวกรองเดือนเป็น pill เลื่อนแนวนอน — ใช้ร่วมกันทั้งสองหน้าเช่นกัน (widget เดียวกัน) */
+  .ov-panel-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .ov-months {
+    flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ov-months a, .ov-months select { flex: none; border-radius: 20px; }
+
+  /* ตารางกลุ่ม (หน้าภาพรวม): บนมือถือเรียงเป็นการ์ด ไม่ใช้ 5 คอลัมน์ — .ov-row ที่นี่ยังเป็น <div> ธรรมดา */
+  .ov-cols { display: none; }
+  .ov-grid { grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+  .ov-prod { grid-column: 1 / -1; }
+  .ov-num, .ov-times, .ov-net { text-align: left; }
+  .ov-num::before, .ov-times::before, .ov-net::before {
+    display: block; font-size: 10px; font-weight: 600; color: var(--muted-soft);
+  }
+  .ov-num.prev::before { content: 'ครั้งก่อน'; }
+  .ov-num.cur::before { content: 'ปัจจุบัน'; }
+  .ov-times::before { content: 'ประกาศ'; }
+  .ov-net::before { content: 'เปลี่ยนสุทธิ'; }
+  .ov-row { padding: 14px 16px; }
+  .ov-quiet, .ov-group, .ov-panel-head { padding-left: 16px; padding-right: 16px; }
+
+  /* ═══ หน้ารายละเอียดธนาคาร (5b) ═══ */
+  .bd-hero { display: block; font-size: 20px; }
+  .bd-name { font-size: 21px; }
+  .bd-logo { width: 46px; height: 46px; }
+  .bd-meta { font-size: 11px; }
+
+  /* ปุ่มรอง (เติมข้อมูลย้อนหลัง / ค้นหาประวัติทั้งปี) ย่อเหลือไอคอนสี่เหลี่ยม — ปุ่มหลักยังมีข้อความเต็ม */
+  .toolbar .btn.btn-icon { width: 38px; height: 38px; padding: 0; flex: none; }
+  .toolbar .btn.btn-icon .btn-txt { display: none; }
+  .toolbar .btn.primary { flex: 1; }
+  .toolbar .status-pill { margin-left: 0; width: fit-content; }
+
+  /* ผลิตภัณฑ์เป็นการ์ดพับ/กาง — scope ใต้ .bd-rows เท่านั้น ไม่แตะ .ov-row ของหน้าภาพรวม (ยังเป็น div ธรรมดา) */
+  .bd-rows { display: flex; flex-direction: column; gap: 10px; }
+  .bd-rows .ov-row {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 0; overflow: hidden;
+  }
+  .bd-rows .ov-grid { grid-template-columns: 1fr auto; gap: 10px; padding: 13px 14px; }
+  .bd-rows .ov-prod { grid-column: 1; }
+  .bd-rows .ov-prod-sub { display: none; }
+  .bd-rows .ov-prod-sub-mob { display: block; font: 400 10.5px var(--sans); color: var(--muted-soft); margin-top: 2px; }
+  .bd-rows .ov-num, .bd-rows .ov-times, .bd-rows .ov-net { display: none; }
+  .bd-rows .ov-chev { display: inline-block; font-size: 14px; color: var(--muted-soft); transition: transform .15s; }
+  .bd-rows .ov-row[open] .ov-chev { transform: rotate(180deg); }
+  .bd-rows .ov-timeline { margin: 0 14px 13px; }
+  .bd-rows .ov-quiet { padding: 13px 14px; }
+
+  /* กราฟแนวโน้ม — design ไม่มีส่วนนี้บนมือถือ */
+  .bd-trend { display: none; }
+
+  /* ไฟล์ย้อนหลัง: การ์ดขาวแยกใบต่อปี */
+  .bd-year {
+    border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; overflow: hidden;
+    border-top: none;
+  }
+  .bd-year:first-of-type { border-top: 1px solid var(--line); }
+  .bd-year > summary { padding: 11px 13px; }
+  .bd-file { display: flex; align-items: center; gap: 10px; padding: 9px 13px; }
+  /* วันที่บังคับขึ้นบรรทัดใหม่ด้วย flex-basis:100% แล้วชื่อไฟล์กับขนาดค่อยไหลต่อกันบรรทัดถัดไป */
+  .bd-file-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; flex: 1; min-width: 0; }
+  .bd-file-info > div:first-child { flex: 1 0 100%; font-size: 12px; color: #5C5F65; }
+  .bd-file .name { font-size: 11px; }
+  .bd-file .size { text-align: left; }
+  .bd-file .size::before { content: '· '; }
+  .bd-file-head { display: none; }
+  .bd-file a {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border: 1px solid var(--line-strong); border-radius: 7px;
+    font-size: 12px;
+  }
 }

@@ -9,7 +9,11 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">💰 CheckRate <span class="subtitle">ติดตามอัตราดอกเบี้ยเงินฝาก</span></div>
+    <a class="brand" href="/">
+      <span class="brand-mark">C</span>
+      <span class="brand-name">CheckRate</span>
+      <span class="subtitle">ติดตามอัตราดอกเบี้ยเงินฝาก</span>
+    </a>
     <nav class="nav">
       <a href="/" class="{{ 'active' if active=='overview' else '' }}">ภาพรวม</a>
       <a href="/config" class="{{ 'active' if active=='config' else '' }}">จัดการอัตรา</a>
@@ -22,6 +26,19 @@
   <footer class="footer">
     CheckRate · เวลาเซิร์ฟเวอร์ {{ ''|default('') }}<span id="clock"></span>
   </footer>
+
+  {# แถบเมนูล่างสำหรับมือถือ — ซ่อนบนจอใหญ่ (topbar ทำหน้าที่แทน) #}
+  <nav class="botnav">
+    <a href="/" class="{{ 'active' if active=='overview' else '' }}">
+      <span class="botnav-ic" aria-hidden="true">▤</span>ภาพรวม
+    </a>
+    <a href="/config" class="{{ 'active' if active=='config' else '' }}">
+      <span class="botnav-ic" aria-hidden="true">⚙</span>จัดการอัตรา
+    </a>
+    <a href="/logs" class="{{ 'active' if active=='logs' else '' }}">
+      <span class="botnav-ic" aria-hidden="true">▶</span>Log
+    </a>
+  </nav>
   <script>
     // นาฬิกา footer
     (function () {

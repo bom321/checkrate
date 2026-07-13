@@ -1,6 +1,10 @@
-// overview.js — รีโหลดหน้าหลังรันเสร็จเพื่อดึงข้อมูลล่าสุด
+// overview.js — ตัวกรองเดือน (สรุปผลการรัน + reload หลังรันเสร็จ ย้ายไปอยู่ใน run.js
+// เพราะหน้า bank detail ใช้ร่วมกัน — ทั้งสองหน้าโชว์แค่สรุป ไม่โชว์ log ดิบ ให้ไปดูที่หน้า Log แทน)
 (function () {
-  window.addEventListener('checkrate:run-finished', () => {
-    setTimeout(() => location.reload(), 800);
-  });
+  const monthSel = document.getElementById('month-select');
+  if (monthSel) {
+    monthSel.addEventListener('change', () => {
+      if (monthSel.value) location.href = '/?month=' + monthSel.value;
+    });
+  }
 })();

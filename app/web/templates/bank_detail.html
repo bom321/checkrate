@@ -1,97 +1,207 @@
 {% extends "base.html" %}
 {% block title %}{{ bank.code }} — CheckRate{% endblock %}
 {% block content %}
-<p><a class="link" href="/">← กลับหน้าภาพรวม</a></p>
-<h1>{{ bank.name }} <span style="color:var(--brand)">({{ bank.code }})</span></h1>
-<p class="page-desc">แนวโน้มอัตราดอกเบี้ยย้อนหลัง (12 ครั้งล่าสุด) · ตรวจล่าสุด {{ last_checked or '-' }}</p>
 
+<div class="bd-crumb">
+  <a href="/?month={{ month }}">ภาพรวม</a><span>›</span><span>รายละเอียดธนาคาร</span><span>›</span><span class="now">{{ bank.name|replace('ธนาคาร', '') }}</span>
+</div>
+
+<!-- แอ็กชันของธนาคารนี้ (id เดิม — run.js ผูกไว้อยู่) -->
 <div class="toolbar">
   <button id="run-bank" class="btn primary" data-code="{{ bank.code }}">▶ รันตรวจสอบธนาคารนี้</button>
-  <button id="backfill-bank" class="btn" data-code="{{ bank.code }}" title="สร้างข้อมูลย้อนหลังจาก PDF ที่เก็บไว้ — ใช้เมื่อเพิ่มอัตราที่ติดตามใหม่">↻ เติมข้อมูลย้อนหลัง</button>
+  <button id="backfill-bank" class="btn btn-icon" data-code="{{ bank.code }}" title="สร้างข้อมูลย้อนหลังจาก PDF ที่เก็บไว้ — ใช้เมื่อเพิ่มอัตราที่ติดตามใหม่">↻ <span class="btn-txt">เติมข้อมูลย้อนหลัง</span></button>
   {% if supports_discover_year %}
-  <button id="discover-year-bank" class="btn" data-code="{{ bank.code }}" title="สแกนหาประกาศทั้งปีแบบละเอียด (ใช้เวลานาน) เผื่อมีไฟล์ที่การตรวจสอบปกติพลาดไป — กดเป็นครั้งคราวพอ">🔍 ค้นหาประวัติทั้งปีอย่างละเอียด</button>
+  <button id="discover-year-bank" class="btn btn-icon" data-code="{{ bank.code }}" title="สแกนหาประกาศทั้งปีแบบละเอียด (ใช้เวลานาน) เผื่อมีไฟล์ที่การตรวจสอบปกติพลาดไป — กดเป็นครั้งคราวพอ">🔍 <span class="btn-txt">ค้นหาประวัติทั้งปีอย่างละเอียด</span></button>
   {% endif %}
   <span id="run-status" class="status-pill idle">พร้อมทำงาน</span>
 </div>
-<div id="run-output" class="output-box" style="display:none"></div>
+{# ไม่มี #run-output ในหน้านี้ตั้งใจ — run.js จะข้ามการโชว์ log ให้เอง เหลือแค่สรุปผลใน #run-notice #}
+<div id="run-notice"></div>
+
+<!-- ประโยคสรุปเดือนนี้ — โชว์เฉพาะมือถือ (desktop มี KPI การ์ดอยู่แล้ว) -->
+<div class="bd-hero">
+  {% if item.announce_count %}
+    {% if item.changed_items %}
+      ประกาศ <b>{{ item.announce_count }} ครั้ง</b> ทำให้ <b class="accent">{{ item.changed_items }} รายการ</b> เปลี่ยนแปลง
+    {% else %}
+      ประกาศ <b>{{ item.announce_count }} ครั้ง</b> แต่อัตราที่ติดตาม <b>คงเดิมทั้งหมด</b>
+    {% endif %}
+  {% else %}
+    ไม่มีประกาศในเดือนนี้{% if item.last_announce %} · ประกาศล่าสุด {{ item.last_announce|thai_date_full }}{% endif %}
+  {% endif %}
+</div>
+
+<!-- โปรไฟล์ธนาคาร + สถิติของเดือนที่เลือก -->
+<div class="bd-profile">
+  <div class="bd-ident">
+    {% if item.logo %}
+      <img class="bd-logo" src="{{ item.logo }}" alt="{{ bank.code }}">
+    {% else %}
+      <div class="bd-logo mono">{{ bank.code[0] }}</div>
+    {% endif %}
+    <div>
+      <div class="bd-name">{{ bank.name|replace('ธนาคาร', '') }}</div>
+      <div class="bd-meta">
+        {{ bank.code }}
+        {% if item.tracked_since %} · ติดตามตั้งแต่ {{ item.tracked_since|thai_date_full }}{% endif %}
+        {% if last_checked %} · อัปเดตล่าสุด {{ last_checked|thai_datetime }}{% endif %}
+        {% if not bank.enabled %} · <b>ปิดใช้งาน</b>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="ov-kpis">
+    <div class="ov-kpi">
+      <div class="ov-kpi-num">{{ targets|length }}</div>
+      <div class="ov-kpi-label">ผลิตภัณฑ์ที่ติดตาม</div>
+    </div>
+    <div class="ov-kpi">
+      <div class="ov-kpi-num">{{ item.announce_count }}<span> ครั้ง</span></div>
+      <div class="ov-kpi-label">ประกาศเดือนนี้</div>
+    </div>
+    <div class="ov-kpi">
+      <div class="ov-kpi-num">{{ item.changed_items }}<span> รายการ</span></div>
+      <div class="ov-kpi-label">เปลี่ยนแปลงเดือนนี้</div>
+    </div>
+  </div>
+</div>
 
 {% if has_data %}
-<div class="chart-wrap">
-  <div class="chart-box"><canvas id="trend"></canvas></div>
-</div>
-
-<div class="bank-card">
-  <div class="bank-head"><div class="bank-title">ประวัติการประกาศ (5 ครั้งล่าสุด)</div></div>
-  <div style="overflow-x:auto">
-  <table class="rates">
-    <thead>
-      <tr>
-        <th>ประเภทอัตรา</th>
-        {% for d in date_cols %}<th class="num">{{ d.effective_date }}</th>{% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for tr in target_rows %}
-      <tr>
-        <td>{{ tr.label }}</td>
-        {% for c in tr.cells %}
-        <td class="num">
-          {{ (c.rate ~ '%') if c.rate is not none else '-' }}
-          {% if c.change and c.change not in ('0.00', '') %}
-            <span class="chg {{ 'up' if c.change.startswith('+') else 'down' }}">({{ c.change }})</span>
-          {% endif %}
-        </td>
-        {% endfor %}
-      </tr>
-      {% endfor %}
-      <tr>
-        <td>PDF</td>
-        {% for d in date_cols %}
-        <td class="num">{% if d.pdf %}<a class="link" href="/pdf/{{ bank.code }}/{{ d.pdf }}" target="_blank">เปิด</a>{% else %}-{% endif %}</td>
-        {% endfor %}
-      </tr>
-    </tbody>
-  </table>
+<!-- แนวโน้มย้อนหลัง (12 ประกาศล่าสุด) — desktop เท่านั้น design ไม่มีส่วนนี้บนมือถือ
+     หัวการ์ด/ตัวคั่นสี/แกน/ป้ายค่า วาดโดย detail.js ทั้งหมด (ดูสัญญาที่ส่งให้ใน #chart-data) -->
+<div class="ov-panel bd-trend">
+  <div class="ov-panel-head">
+    <div>
+      <div class="ov-panel-title">แนวโน้มย้อนหลัง</div>
+      <div class="bd-trend-sub">อัตราแต่ละระยะ ตามวันที่ประกาศมีผล · <span id="trend-count"></span> ประกาศล่าสุด</div>
+    </div>
+    <span id="trend-badge" class="bd-trend-badge" hidden></span>
+  </div>
+  <div id="trend-legend" class="bd-trend-legend">
+    <span class="unit">% ต่อปี</span>
+  </div>
+  <div class="bd-trend-body">
+    <svg id="trend" class="bd-trend-svg" viewBox="0 0 1000 260" role="img" aria-label="กราฟแนวโน้มอัตราดอกเบี้ยย้อนหลัง"></svg>
   </div>
 </div>
+
+<!-- อัตราทุกระยะในเดือนที่เลือก -->
+<div class="ov-panel" style="margin-top:14px">
+  <div class="ov-panel-head">
+    <div class="ov-panel-title">อัตราดอกเบี้ยเงินฝากทุกระยะ</div>
+    <div class="ov-months">
+      {% for m in month_options[:2] %}
+        <a class="{{ 'on' if m == month }}" href="/bank/{{ bank.code }}?month={{ m }}">{{ m|thai_month_short }}</a>
+      {% endfor %}
+      {% if month not in month_options[:2] %}
+        <a class="on" href="/bank/{{ bank.code }}?month={{ month }}">{{ month|thai_month_short }}</a>
+      {% endif %}
+      <select id="month-select" data-code="{{ bank.code }}" aria-label="เลือกเดือน">
+        <option value="">เลือกเดือน ▾</option>
+        {% for m in month_options %}
+          <option value="{{ m }}" {{ 'selected' if m == month }}>{{ m|thai_month }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="ov-grid ov-cols">
+    <div>ผลิตภัณฑ์ / ระยะ</div>
+    <div style="text-align:right">ครั้งก่อน</div>
+    <div style="text-align:right">ปัจจุบัน</div>
+    <div style="text-align:center">ประกาศ</div>
+    <div style="text-align:right">เปลี่ยนสุทธิ</div>
+  </div>
+
+  <div class="bd-rows">
+  {% for p in item.products_all %}
+  <details class="ov-row {{ 'once' if p.times == 1 }}" data-changed="{{ 1 if p.times else 0 }}" {{ 'open' if p.times }}>
+    <summary class="ov-grid">
+      <div class="ov-prod">
+        <div class="ov-prod-name">
+          {{ p.label }}
+          {% if p.times > 1 %}<span class="ov-tag">ประกาศซ้ำ</span>{% endif %}
+        </div>
+        {% if p.depositor %}<div class="ov-prod-sub">{{ p.depositor }}</div>{% endif %}
+        <div class="ov-prod-sub-mob">
+          {% if p.times %}{{ p.depositor }} · {{ p.times }} ครั้ง · {{ '%+.2f%%'|format(p.net) if p.net is not none else '—' }}
+          {% else %}{{ (p.current ~ '%') if p.current else '—' }} · ไม่เปลี่ยนแปลง{% endif %}
+        </div>
+      </div>
+      <div class="ov-num prev">{{ (p.previous ~ '%') if p.previous else '—' }}</div>
+      <div class="ov-num cur">{{ (p.current ~ '%') if p.current else '—' }}</div>
+      <div class="ov-times {{ 'multi' if p.times > 1 }}">{{ (p.times ~ ' ครั้ง') if p.times else '—' }}</div>
+      <div class="ov-net {{ 'up' if p.net and p.net > 0 else ('down' if p.net and p.net < 0 else 'flat') }}">
+        {{ '%+.2f%%'|format(p.net) if p.times else '—' }}
+      </div>
+      <span class="ov-chev" aria-hidden="true">﹀</span>
+    </summary>
+
+    {% if p.times %}
+    <div class="ov-timeline">
+      <div class="ov-timeline-cap">ประวัติการประกาศเดือนนี้</div>
+      {% for t in p.timeline %}
+      <div class="ov-tl-row">
+        <span class="date">{{ t.date|thai_date }}</span>
+        <span class="from">{{ t.before }}%</span>
+        <span class="arrow">→</span>
+        <span class="to">{{ t.after }}%</span>
+        <span class="delta {{ 'up' if t.delta > 0 else 'down' }}">{{ '%+.2f%%'|format(t.delta) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </details>
+  {% else %}
+  <div class="ov-quiet">ยังไม่มีอัตราที่ติดตามสำหรับธนาคารนี้ — เพิ่มได้ที่หน้าจัดการอัตรา</div>
+  {% endfor %}
+  </div>
+
+  {% if not item.announce_count %}
+  <div class="ov-quiet">
+    ไม่มีประกาศในเดือนนี้{% if item.last_announce %} · ประกาศล่าสุด {{ item.last_announce|thai_date_full }}{% endif %} — ตัวเลขที่แสดงคืออัตราที่มีผลอยู่
+  </div>
+  {% endif %}
+</div>
 {% else %}
-<div class="bank-card"><div class="empty">ยังไม่มีข้อมูลประวัติสำหรับธนาคารนี้</div></div>
+<div class="ov-panel"><div class="empty">ยังไม่มีข้อมูลประวัติสำหรับธนาคารนี้ — กด "รันตรวจสอบธนาคารนี้" เพื่อดึงครั้งแรก</div></div>
 {% endif %}
 
-<h2 style="font-size:16px;margin:28px 0 12px">📁 ไฟล์ประกาศย้อนหลังทั้งหมด <span style="color:var(--muted);font-weight:400">(สำหรับสอบทาน)</span></h2>
-{% if pdf_years %}
-{% for grp in pdf_years %}
-<details class="bank-card year-group"{% if loop.first %} open{% endif %}>
-  <summary class="bank-head">
-    <div class="bank-title">ปี {{ grp.year }} <span style="color:var(--muted);font-weight:400">({{ grp.files|length }} ไฟล์)</span></div>
-    <span class="year-chevron" aria-hidden="true">▾</span>
-  </summary>
-  <div style="overflow-x:auto">
-  <table class="rates">
-    <thead>
-      <tr><th>วันที่มีผล</th><th>ชื่อไฟล์</th><th class="num">ขนาด</th><th></th></tr>
-    </thead>
-    <tbody>
-      {% for f in grp.files %}
-      <tr>
-        <td>{{ f.date or '-' }}</td>
-        <td>{{ f.name }}</td>
-        <td class="num">{{ (f.size_kb ~ ' KB') if f.size_kb is not none else '-' }}</td>
-        <td class="num"><a class="link" href="/pdf/{{ bank.code }}/{{ f.name }}" target="_blank">ดาวน์โหลด</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<!-- ไฟล์ประกาศย้อนหลังทั้งหมด -->
+<div class="ov-panel" style="margin-top:14px">
+  <div class="ov-panel-head">
+    <div class="ov-panel-title">📁 ไฟล์ประกาศย้อนหลังทั้งหมด</div>
+    <span class="bd-files-count">รวมทุกระยะ — {{ pdf_count }} ไฟล์</span>
   </div>
-</details>
-{% endfor %}
-{% else %}
-<div class="bank-card"><div class="empty">ยังไม่มีไฟล์ที่เก็บไว้</div></div>
-{% endif %}
+
+  {% for grp in pdf_years %}
+  <details class="bd-year"{% if loop.first %} open{% endif %}>
+    <summary>
+      <span>ปี {{ grp.year|thai_year }} <span class="muted">({{ grp.files|length }} ไฟล์)</span></span>
+      <span class="year-chevron" aria-hidden="true">▾</span>
+    </summary>
+    <div class="bd-file bd-file-head">
+      <div>วันที่มีผล</div><div>ชื่อไฟล์</div><div style="text-align:right">ขนาด</div><div></div>
+    </div>
+    {% for f in grp.files %}
+    <div class="bd-file">
+      <div class="bd-file-info">
+        <div>{{ f.date|thai_date if f.date else '-' }}</div>
+        <div class="name">{{ f.name }}</div>
+        <div class="size">{{ (f.size_kb ~ ' KB') if f.size_kb is not none else '-' }}</div>
+      </div>
+      <div style="text-align:right"><a href="/pdf/{{ bank.code }}/{{ f.name }}" target="_blank" title="ดาวน์โหลด">⬇</a></div>
+    </div>
+    {% endfor %}
+  </details>
+  {% else %}
+  <div class="ov-quiet">ยังไม่มีไฟล์ที่เก็บไว้</div>
+  {% endfor %}
+</div>
+
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/vendor/chart.umd.min.js"></script>
 <script src="/static/js/run.js"></script>
 <script id="chart-data" type="application/json">
 {"labels": {{ chart_labels|tojson }}, "datasets": {{ chart_datasets|tojson }}}

@@ -17,11 +17,15 @@
 - **ค้นหาประวัติย้อนหลัง** — `discover_year` สแกนหาไฟล์ประกาศเก่าทั้งปี (ธนาคารที่รองรับเท่านั้น) และ `--backfill` สร้าง CSV ใหม่จาก PDF ที่ดาวน์โหลดเก็บไว้แล้ว
 - **แจ้งเตือนอีเมลผ่าน SMTP + App Password** (ไม่พึ่ง Gmail API/OAuth) รองรับผู้รับหลายคน แก้ผ่านหน้าเว็บได้
 - **เว็บ Dashboard (FastAPI):**
-  - **ภาพรวม** — 1 ตารางต่อ 1 ธนาคาร เทียบอัตราปัจจุบัน vs ครั้งก่อน + ไฮไลต์แถวที่เปลี่ยนแปลง
-  - **รายละเอียดต่อธนาคาร** — กราฟแนวโน้ม (Chart.js) + ตารางประวัติ + ลิงก์เปิด PDF
+  - **ภาพรวม** (`/?month=YYYY-MM`) — สรุปรายเดือนต่อธนาคาร: ประกาศไปกี่ครั้ง, อัตราไหนเปลี่ยน, ขึ้น/ลงสุทธิเท่าไร
+    พร้อม KPI รวมทุกธนาคารด้านบนและโลโก้ธนาคาร (ถ้ามีไฟล์)
+  - **รายละเอียดต่อธนาคาร** — กราฟแนวโน้ม (วาดเป็น SVG เอง ไม่พึ่งไลบรารี, วันที่แสดงเป็น พ.ศ.) + สรุปรายเดือนแบบเดียวกับภาพรวม + ลิงก์เปิด PDF ย้อนหลังจัดกลุ่มตามปี
   - **จัดการอัตรา** — เพิ่ม/ลบ/แก้ rate target (กำหนด key + ชื่อย่อเอง), เปิด-ปิดธนาคาร, แก้ลิงก์ดาวน์โหลดเอกสาร, ตั้งผู้รับอีเมล
-  - **Log & รัน** — ดู log, สั่ง "รันตรวจสอบทันที", ปุ่ม "ทดสอบส่งอีเมล", ปุ่มค้นหาประวัติทั้งปี (ทุกธนาคารที่รองรับ)
-- **ทำงานแบบ offline ได้** — Chart.js และฟอนต์ไทย (Noto Sans Thai) ฝังในโปรเจกต์ ไม่พึ่ง CDN
+  - **Log & รัน** — ดู log (แยกแท็ก `[CODE]` ต่อธนาคาร แม้รันขนาน), สั่ง "รันตรวจสอบทันที", ปุ่ม "ทดสอบส่งอีเมล", ปุ่มค้นหาประวัติทั้งปี (ทุกธนาคารที่รองรับ)
+  - Responsive — มีแถบเมนูล่างสำหรับมือถือ, topbar สำหรับจอใหญ่
+- **ทำงานแบบ offline ได้** — กราฟวาดด้วย SVG ล้วน (ไม่พึ่งไลบรารีกราฟ) และฟอนต์ IBM Plex (Sans Thai + Mono) ฝังในโปรเจกต์ ไม่พึ่ง CDN
+  โลโก้ธนาคาร (`app/web/static/img/logos/`) ก็เป็นไฟล์ในเครื่องเช่นกัน — ธนาคารที่ไม่มีไฟล์ เว็บ fallback
+  ไปแสดงตัวอักษรย่อ (monogram) ให้เอง
 - **พร้อม Docker** — `Dockerfile` + `docker-compose.yml` + ตั้งเวลาด้วย supercronic ในคอนเทนเนอร์
 
 ---
@@ -44,8 +48,11 @@ CheckRate/
 │   └── web/                     # เว็บ Dashboard (FastAPI)
 │       ├── main.py              # routes + API
 │       ├── data_access.py       # ชั้นอ่าน config/CSV/log/result
+│       ├── thaidate.py          # Jinja filter แปลงวันที่ ISO → รูปแบบไทย (พ.ศ.)
 │       ├── templates/           # Jinja2
-│       └── static/              # CSS/JS/ฟอนต์/Chart.js (ฝังในเครื่อง)
+│       └── static/              # CSS/JS/ฟอนต์ IBM Plex/โลโก้ธนาคาร (ฝังในเครื่อง)
+├── tools/
+│   └── fetch_logos.py           # dev tool รันมือครั้งเดียว — ดึงโลโก้ธนาคารจาก logo.dev
 ├── data/                        # DATA_DIR (gitignored) — CSV/PDF/log/config/settings
 ├── Dockerfile
 ├── docker-compose.yml
@@ -161,11 +168,17 @@ docker-compose up -d --build
 `row_keyword`/`section_keyword`) และรองรับ **tier วงเงิน (`amount_m`) กับทุกแถวเสมอ** แม้ประกาศฉบับนั้น
 จะไม่ได้แบ่ง tier ก็ตาม — เผื่อธนาคารเปลี่ยนมาแบ่ง tier ในอนาคตโดยไม่ต้องแก้ parser
 
+**โลโก้ธนาคารบนเว็บ** — ไม่บังคับ ไม่มีก็ fallback เป็นตัวอักษรย่อ ถ้าต้องการโลโก้จริง รันครั้งเดียว:
+```bash
+export LOGODEV_TOKEN=pk_xxxx           # publishable token จาก logo.dev
+python tools/fetch_logos.py            # ทุกธนาคาร (ต้องเพิ่มโดเมนใน DOMAINS ก่อนถ้าเป็นธนาคารใหม่)
+```
+
 ---
 
 ## Tech stack
 
-Python 3.13 · FastAPI · Uvicorn · Jinja2 · pdfplumber · curl_cffi · tesseract (OCR) · Chart.js ·
+Python 3.13 · FastAPI · Uvicorn · Jinja2 · pdfplumber · curl_cffi · tesseract (OCR) ·
 supercronic · Docker
 
 > `curl_cffi` ใช้ impersonate TLS fingerprint ของ Chrome เพื่อดาวน์โหลด PDF ของธนาคารที่มี bot-protection

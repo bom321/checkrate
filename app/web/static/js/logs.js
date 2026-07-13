@@ -14,6 +14,11 @@
     }[c]));
   }
 
+  // ปีในบรรทัด log เป็น ค.ศ. — แปลงเป็น พ.ศ. ให้เข้าชุดกับที่อื่นในเว็บ (thaidate.py)
+  function thaiTs(ts) {
+    return String(ts ?? '').replace(/^(\d{4})/, (_, y) => String(Number(y) + 543));
+  }
+
   async function loadLogs() {
     const params = new URLSearchParams({
       level: levelSel.value, bank: bankSel.value, lines: linesSel.value,
@@ -28,7 +33,9 @@
       }
       consoleEl.innerHTML = data.lines.map(l => {
         const lvl = esc(l.level || '');
-        return `<div class="log-line"><span class="ts">${esc(l.ts)}</span> <span class="lvl ${lvl}">${lvl}</span> ${esc(l.msg)}</div>`;
+        return `<div class="log-line"><span class="ts">${esc(thaiTs(l.ts))}</span>` +
+               `<span class="lvl ${lvl}">${lvl}</span>` +
+               `<span class="msg">${esc(l.msg)}</span></div>`;
       }).join('');
       consoleEl.scrollTop = consoleEl.scrollHeight;
     } catch (e) {

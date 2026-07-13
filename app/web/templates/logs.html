@@ -1,32 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Log — CheckRate{% endblock %}
 {% block content %}
-<h1>Log &amp; การรันตรวจสอบ</h1>
-<p class="page-desc">ดู log ล่าสุด กรองตาม level/ธนาคาร · รันตรวจสอบทันที หรือทดสอบส่งอีเมล</p>
 
-<div class="toolbar">
+<div class="pg-head">
+  <div>
+    <h1>Log &amp; การรันตรวจสอบ</h1>
+    <p class="page-desc">รันตรวจสอบทันที เติมข้อมูลย้อนหลัง ค้นหาประวัติทั้งปี หรือทดสอบส่งอีเมล · ดู log ล่าสุดกรองตาม level/ธนาคาร</p>
+  </div>
+</div>
+
+<div class="lg-actions">
   <button id="run-all" class="btn primary">▶ รันตรวจสอบทันที (ทุกธนาคาร)</button>
-  <button id="backfill-all" class="btn" title="สร้างข้อมูลย้อนหลังจาก PDF ที่เก็บไว้ — ใช้เมื่อเพิ่มอัตราที่ติดตามใหม่">↻ เติมข้อมูลย้อนหลัง (ทุกธนาคาร)</button>
-  <button id="discover-year-all" class="btn" title="สแกนหาประกาศทั้งปีแบบละเอียด (ใช้เวลานาน) เฉพาะธนาคารที่รองรับ — ธนาคารอื่นจะถูกข้ามอัตโนมัติ">🔍 ค้นหาประวัติทั้งปีอย่างละเอียด (ทุกธนาคาร)</button>
-  <button id="test-email" class="btn">✉️ ทดสอบส่งอีเมล</button>
+  <button id="backfill-all" class="btn" title="สร้าง CSV ใหม่จาก PDF ที่เก็บไว้ — ใช้เมื่อเพิ่มอัตราที่ติดตามใหม่">↻ เติมข้อมูลย้อนหลัง (ทุกธนาคาร)</button>
+  <button id="discover-year-all" class="btn" title="ไล่ตรวจทุกวันตั้งแต่ต้นปี ดาวน์โหลด PDF ที่ยังไม่มี แล้วสร้าง CSV ใหม่ — ใช้เวลานาน เฉพาะธนาคารที่รองรับ ธนาคารอื่นจะถูกข้ามอัตโนมัติ">⬇ ค้นหาประวัติทั้งปีอย่างละเอียด</button>
+  <button id="test-email" class="btn">✉ ทดสอบส่งอีเมล</button>
   <span id="run-status" class="status-pill idle">พร้อมทำงาน</span>
 </div>
+
 <div id="run-output" class="output-box" style="display:none"></div>
 
 <div class="filters">
-  <label>Level
+  <label class="f-sel">Level
     <select id="f-level">
       <option value="">ทั้งหมด</option>
       <option>INFO</option><option>WARNING</option><option>ERROR</option><option>DEBUG</option>
     </select>
   </label>
-  <label>ธนาคาร
+  <label class="f-sel">ธนาคาร
     <select id="f-bank">
       <option value="">ทั้งหมด</option>
       {% for c in banks %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
     </select>
   </label>
-  <label>แสดง
+  <label class="f-sel">แสดง
     <select id="f-lines">
       <option value="200">200 บรรทัด</option>
       <option value="500" selected>500 บรรทัด</option>
@@ -34,10 +40,13 @@
     </select>
   </label>
   <button id="refresh-logs" class="btn small">รีเฟรช</button>
-  <label class="switch"><input type="checkbox" id="auto-refresh"> auto-refresh ทุก 10 วิ</label>
+  <label class="switch plain"><input type="checkbox" id="auto-refresh"> auto-refresh ทุก 10 วิ</label>
 </div>
 
-<div id="log-console" class="log-console">กำลังโหลด...</div>
+<div class="lg-panel">
+  <div class="lg-panel-head">รายการ log ล่าสุด</div>
+  <div id="log-console" class="log-console">กำลังโหลด...</div>
+</div>
 {% endblock %}
 
 {% block scripts %}

@@ -1,33 +1,50 @@
 {% extends "base.html" %}
 {% block title %}จัดการอัตรา — CheckRate{% endblock %}
 {% block content %}
-<h1>จัดการอัตราที่ติดตาม</h1>
-<p class="page-desc">เพิ่ม/ลบ/แก้อัตราที่ติดตาม (กำหนด key และชื่อย่อ/alias เอง) · เปิด-ปิดธนาคาร · แก้ลิงก์ดาวน์โหลดเอกสาร · ตั้งผู้รับอีเมล</p>
+
+<div class="pg-head">
+  <div>
+    <h1>จัดการอัตราที่ติดตาม</h1>
+    <p class="page-desc">เพิ่ม/ลบ/แก้อัตราที่ติดตามในแต่ละธนาคาร · กำหนดคีย์ ประเภทบัญชี ผลิตภัณฑ์ ผู้รับดอกเบี้ย ระยะและวงเงิน · แก้ลิงก์เอกสารและเปิด-ปิดธนาคาร</p>
+  </div>
+  <div class="pg-head-actions">
+    <button id="reload-config" class="btn">โหลดใหม่</button>
+    <button id="save-config" class="btn primary">บันทึกการตั้งค่า</button>
+  </div>
+</div>
 
 <div id="msg"></div>
 
-<div class="cfg-bank">
-  <div class="cfg-field">
-    <label>ผู้รับอีเมล (คั่นหลายคนด้วยเครื่องหมายจุลภาค , )</label>
-    <input type="text" id="email-to" placeholder="name@example.com, other@example.com">
+<div class="cfg-email">
+  <div class="cfg-email-head">
+    <span class="cfg-email-title">ผู้รับอีเมลแจ้งเตือน</span>
+    <span class="cfg-email-hint">คั่นหลายคนด้วยเครื่องหมายจุลภาค ( , )</span>
   </div>
-  <button id="save-settings" class="btn small">บันทึกผู้รับอีเมล</button>
+  <div class="cfg-email-row">
+    <input type="text" id="email-to" placeholder="name@example.com, other@example.com">
+    <button id="save-settings" class="btn">บันทึก</button>
+  </div>
 </div>
 
-<p class="page-desc" style="margin:0 0 14px">
-  <strong>Section / Row</strong>: คำที่ต้องปรากฏในหัวข้อ/แถวของ PDF ประกาศ (เว้นว่าง = ใช้ค่าเริ่มต้น
-  "เงินฝากประจำ แบบมีสมุด" + "{เดือน} เดือน")<br>
-  <strong>ผู้รับดอกเบี้ย</strong>: พิมพ์คำเช่น "บุคคลธรรมดา", "กองทุน", "ราชการ" หรือเลขคอลัมน์ 1-13 ตามตารางประกาศ
-  (เว้นว่าง = บุคคลธรรมดา) — คอลัมน์ของ SCB: 1=บุคคลธรรมดา 2=นิติบุคคลทั่วไป 3=ราชการ 4=นิติบุคคลไม่แสวงหากำไร
-  5=สถาบันการเงิน 6=สถานศึกษา 7=กองทุน 8=สหกรณ์ 9-11=ผู้มีถิ่นฐานนอกประเทศ 12=นิติบุคคลพิเศษ 13=บุคคลพิเศษ
-</p>
+<div class="cfg-legend">
+  <div class="cfg-legend-row">
+    <span class="cfg-legend-chip">ประเภทบัญชี · ผลิตภัณฑ์</span>
+    <span>คำที่ต้องปรากฏในหัวข้อ/แถวของ PDF ประกาศ — เว้นว่างได้ ระบบจะใช้ค่าเริ่มต้น “เงินฝากประจำ แบบมีสมุด” + “{เดือน} เดือน”</span>
+  </div>
+  <div class="cfg-legend-row">
+    <span class="cfg-legend-chip">ผู้รับดอกเบี้ย</span>
+    <span>เช่น บุคคลธรรมดา, กองทุน, ราชการ หรือระบุเลขคอลัมน์ 1–13 ตามตารางประกาศ — เว้นว่าง = บุคคลธรรมดา ·
+      คอลัมน์ของ SCB: 1=บุคคลธรรมดา 2=นิติบุคคลทั่วไป 3=ราชการ 4=นิติบุคคลไม่แสวงหากำไร 5=สถาบันการเงิน
+      6=สถานศึกษา 7=กองทุน 8=สหกรณ์ 9-11=ผู้มีถิ่นฐานนอกประเทศ 12=นิติบุคคลพิเศษ 13=บุคคลพิเศษ</span>
+  </div>
+</div>
+
+<div class="cfg-banks-head">
+  <span class="cfg-banks-title">ธนาคารที่ติดตาม</span>
+  <span class="cfg-banks-count" id="banks-count"></span>
+</div>
 
 <div id="banks-container"></div>
-
-<div class="toolbar" style="margin-top:20px">
-  <button id="save-config" class="btn primary">💾 บันทึกการตั้งค่าธนาคาร</button>
-  <button id="reload-config" class="btn">โหลดใหม่ (ยกเลิกการแก้ไข)</button>
-</div>
 {% endblock %}
 
 {% block scripts %}

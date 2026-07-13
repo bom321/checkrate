@@ -7,3 +7,5 @@ __pycache__/
 *.log
 handover.md
 CLAUDE.md
+backup/
+Finance app redesign/

@@ -3,7 +3,7 @@
 main.py — FastAPI backend สำหรับเว็บ Dashboard ติดตามอัตราดอกเบี้ยเงินฝาก
 
 หน้า:
-  /                Overview — 1 ตารางต่อ 1 ธนาคาร (เทียบอัตราปัจจุบัน vs ก่อนหน้า, ไฮไลต์แถวที่เปลี่ยน)
+  /?month=YYYY-MM  Overview — สรุปรายเดือน: ประกาศกี่ครั้ง · อัตราไหนเปลี่ยน · รายการที่ประกาศซ้ำในเดือนเดียว
   /bank/{code}     รายละเอียด — กราฟแนวโน้ม (Chart.js) + ตารางประวัติ + ลิงก์ PDF
   /config          จัดการ rate_targets / enabled / ลิงก์ดาวน์โหลด + ผู้รับอีเมล
   /logs            ดู log + ปุ่มรันตรวจสอบ + ทดสอบส่งอีเมล
@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import data_access as da
+from . import thaidate
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -33,6 +34,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))  # .../CheckRate
 app = FastAPI(title="CheckRate — Deposit Rate Dashboard")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+templates.env.filters.update(thaidate.FILTERS)   # thai_date / thai_month / thai_datetime ...
 
 
 # ─────────────────────────── Job manager (run monitor) ───────────────────────────
@@ -95,49 +97,120 @@ def _start_job(args: list[str], kind: str, only: str | None) -> bool:
     return True
 
 
-# ─────────────────────────── Overview ───────────────────────────
-def _build_overview() -> list[dict]:
-    """ประกอบข้อมูลตารางต่อธนาคาร (เฉพาะที่มี CSV จริง)"""
-    result = []
-    for bank in da.load_banks():
-        code = bank["code"]
-        if not da.bank_has_csv(code):
-            result.append({"bank": bank, "has_data": False})
-            continue
-        cur, prev = da.latest_two_rows(code)
-        rows = []
-        for t in bank.get("rate_targets", []):
-            key = t["key"]
-            cur_v = _fmt_rate(cur.get(key)) if cur else None
-            prev_v = _fmt_rate(prev.get(key)) if prev else None
-            change = None
-            if cur_v is not None and prev_v is not None:
-                change = round(float(cur_v) - float(prev_v), 2)
-            rows.append({
-                "label": t.get("alias") or t.get("label") or key,
-                "key": key,
-                "current": cur_v, "previous": prev_v, "change": change,
-                "changed": bool(change is not None and abs(change) > 0),
-            })
-        result.append({
-            "bank": bank, "has_data": True, "rows": rows,
-            "effective_date": cur.get("effective_date") if cur else None,
-            "prev_date": prev.get("effective_date") if prev else None,
-            "last_checked": da.last_checked(code),
+# ─────────────────────────── Overview (สรุปรายเดือน) ───────────────────────────
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+def _logo_url(code: str) -> str | None:
+    """โลโก้ธนาคารที่ดึงมาด้วย tools/fetch_logos.py — ไม่มีไฟล์ → None (template ใช้ monogram แทน)"""
+    fname = f"{code.lower()}.png"
+    if os.path.isfile(os.path.join(STATIC_DIR, "img", "logos", fname)):
+        return f"/static/img/logos/{fname}"
+    return None
+
+
+def _month_options(code: str | None = None) -> list[str]:
+    """เดือนที่มีประกาศอย่างน้อย 1 ฉบับ — ใหม่ → เก่า (ไม่ระบุ code = รวมทุกธนาคาร)"""
+    codes = [code] if code else [b["code"] for b in da.load_banks()]
+    months = {(r.get("effective_date") or "")[:7]
+              for c in codes for r in da.read_history(c)}
+    return sorted((m for m in months if _MONTH_RE.match(m)), reverse=True)
+
+
+def _bank_month_summary(bank: dict, month: str) -> dict:
+    """สรุปของธนาคารหนึ่งในเดือนหนึ่ง: ประกาศกี่ครั้ง · อัตราไหนเปลี่ยนบ้าง · เปลี่ยนกี่ครั้ง
+
+    1 แถวใน CSV = ประกาศ 1 ฉบับ (dedupe ด้วย effective_date มาแล้วจาก monitor)
+    'ครั้งก่อน' = อัตราจากประกาศฉบับสุดท้าย **ก่อน** เดือนนี้ (baseline) ไม่ใช่แถวก่อนหน้าใน CSV
+    จึงคำนวณ net จากค่า rate_* เอง ไม่ใช้คอลัมน์ change_* (นั่นเทียบแถวต่อแถว)
+    """
+    code = bank["code"]
+    rows = da.read_history(code)
+    base = {"bank": bank, "logo": _logo_url(code), "has_data": bool(rows)}
+    if not rows:
+        return base | {"announce_count": 0, "products": [], "products_all": [],
+                       "changed_items": 0, "total_times": 0, "net_sum": 0.0, "up": 0, "down": 0,
+                       "last_announce": None, "tracked_since": None, "no_prev": False}
+
+    before = [r for r in rows if (r.get("effective_date") or "")[:7] < month]
+    in_month = [r for r in rows if (r.get("effective_date") or "")[:7] == month]
+    baseline = before[-1] if before else None       # ไม่มีประกาศก่อนหน้าเลย → ไม่มีอะไรให้เทียบ
+
+    products_all = []
+    for t in bank.get("rate_targets", []):
+        key = t["key"]
+        prev = _fmt_rate(baseline.get(key)) if baseline else None
+        last, timeline = prev, []
+        for r in in_month:
+            v = _fmt_rate(r.get(key))
+            if v is None:
+                continue
+            if last is not None and float(v) != float(last):
+                timeline.append({"date": r.get("effective_date"), "before": last, "after": v,
+                                 "delta": round(float(v) - float(last), 2)})
+            last = v
+        net = round(float(last) - float(prev), 2) if (last and prev) else None
+        products_all.append({
+            "label": t.get("alias") or t.get("label") or key,
+            "depositor": t.get("depositor") or "บุคคลธรรมดา",   # ไม่ระบุใน config = อัตราของบุคคลธรรมดา
+            "key": key, "previous": prev, "current": last,
+            "net": net, "times": len(timeline), "timeline": timeline,
         })
-    return result
+
+    changed = [p for p in products_all if p["times"]]   # 2a/5a: สถิติทั้งหมดนับจากรายการที่เปลี่ยนจริง
+    last_row = in_month[-1] if in_month else baseline   # เดือนที่ไม่มีประกาศ → อ้างฉบับสุดท้ายก่อนหน้า
+    return base | {
+        "announce_count": len(in_month),
+        "last_announce": last_row.get("effective_date") if last_row else None,
+        "tracked_since": rows[0].get("effective_date"),
+        "products": changed,          # overview — เฉพาะที่เปลี่ยน
+        "products_all": products_all,  # bank detail — ทุกระยะ รวมที่คงเดิม
+        "changed_items": len(changed),
+        "total_times": sum(p["times"] for p in changed),
+        "net_sum": round(sum(p["net"] for p in changed if p["net"] is not None), 2),
+        "up": sum(1 for p in changed if p["net"] and p["net"] > 0),
+        "down": sum(1 for p in changed if p["net"] and p["net"] < 0),
+        "no_prev": bool(in_month and baseline is None),   # เดือนที่มีประกาศแรกสุดในประวัติ
+    }
+
+
+def _build_overview(month: str, options: list[str]) -> dict:
+    """ประกอบ context ของหน้า overview ทั้งหน้า (การ์ดธนาคาร + ตารางกลุ่ม + KPI หัวหน้า)"""
+    summaries = [_bank_month_summary(b, month) for b in da.load_banks()]
+    active, other = [], []
+    for s in summaries:
+        (active if s["has_data"] and s["bank"].get("enabled") else other).append(s)
+    checked = [da.last_checked(s["bank"]["code"]) for s in summaries if s["has_data"]]
+
+    return {
+        "month": month,
+        "month_options": options,
+        "banks": active,
+        "other_banks": other,          # ปิดใช้งาน / ยังไม่มีข้อมูล — แสดงเป็นแถบ muted ท้ายหน้า
+        "kpi": {
+            "announcements": sum(s["announce_count"] for s in active),
+            "changed_items": sum(s["changed_items"] for s in active),
+            "up": sum(s["up"] for s in active),
+            "down": sum(s["down"] for s in active),
+            "banks_announced": sum(1 for s in active if s["announce_count"]),
+            "banks_total": len(active),
+            "last_checked": max((c for c in checked if c), default=None),
+        },
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
-def overview(request: Request):
-    return templates.TemplateResponse(request, "overview.html", {
-        "banks": _build_overview(), "active": "overview",
-    })
+def overview(request: Request, month: str | None = None):
+    options = _month_options()
+    if not (month and _MONTH_RE.match(month)):
+        month = options[0] if options else datetime.now().strftime("%Y-%m")
+    ctx = _build_overview(month, options)
+    return templates.TemplateResponse(request, "overview.html", ctx | {"active": "overview"})
 
 
 # ─────────────────────────── Bank detail ───────────────────────────
 @app.get("/bank/{code}", response_class=HTMLResponse)
-def bank_detail(request: Request, code: str):
+def bank_detail(request: Request, code: str, month: str | None = None):
     bank = da.get_bank(code)
     if bank is None:
         raise HTTPException(404, f"ไม่พบธนาคาร {code}")
@@ -145,10 +218,17 @@ def bank_detail(request: Request, code: str):
     history = da.read_history(code)
     targets = bank.get("rate_targets", [])
 
+    pdf_years = da.list_pdfs_by_year(code)
+
+    options = _month_options(bank["code"])
+    if not (month and _MONTH_RE.match(month)):
+        month = options[0] if options else datetime.now().strftime("%Y-%m")
+    summary = _bank_month_summary(bank, month)
+
     # ข้อมูลกราฟ: labels = วันที่, 1 dataset ต่อ 1 rate key — แสดงย้อนหลังไม่เกิน 12 ครั้งล่าสุด
     # (history เรียงเก่า→ใหม่อยู่แล้ว slice ท้ายสุด = 12 ครั้งล่าสุด; ธนาคารที่มีน้อยกว่าได้ครบตามเดิม)
     chart_history = history[-12:]
-    labels = [r.get("effective_date", "") for r in chart_history]
+    labels = [thaidate.thai_date(r.get("effective_date", "")) for r in chart_history]
     datasets = []
     for t in targets:
         key = t["key"]
@@ -158,26 +238,14 @@ def bank_detail(request: Request, code: str):
             series.append(float(v) if v is not None else None)
         datasets.append({"key": key, "label": t.get("alias") or t.get("label") or key, "data": series})
 
-    # ตารางประวัติแบบสลับแกน: วันที่ = คอลัมน์ (ใหม่สุดก่อน), ประเภทอัตรา = แถว
-    # แสดงย้อนหลังไม่เกิน 5 ครั้งล่าสุดก็พอ
-    recent = list(reversed(history))[:5]     # history เรียงเก่า→ใหม่, reversed = ใหม่→เก่า
-    date_cols = [{"effective_date": r.get("effective_date", ""),
-                  "pdf": da.pdf_for_date(code, r.get("effective_date", ""))}
-                 for r in recent]
-    target_rows = []
-    for t in targets:
-        key = t["key"]
-        cells = [{"rate": _fmt_rate(r.get(key)),
-                  "change": r.get(da.common.change_col(key), "")} for r in recent]
-        target_rows.append({"label": t.get("alias") or t.get("label") or key, "cells": cells})
-
     return templates.TemplateResponse(request, "bank_detail.html", {
         "active": "overview", "bank": bank, "targets": targets,
-        "chart_labels": labels, "chart_datasets": datasets,
-        "date_cols": date_cols, "target_rows": target_rows, "has_data": bool(history),
+        "item": summary, "month": month, "month_options": options,
+        "chart_labels": labels, "chart_datasets": datasets, "has_data": bool(history),
         "last_checked": da.last_checked(code),
         "supports_discover_year": da.supports_discover_year(bank),
-        "pdf_years": da.list_pdfs_by_year(code),
+        "pdf_years": pdf_years,
+        "pdf_count": sum(len(g["files"]) for g in pdf_years),
     })
 
 
@@ -203,7 +271,10 @@ def config_page(request: Request):
 
 @app.get("/api/config")
 def api_get_config():
-    return {"banks": da.load_banks(), "settings": da.load_settings()}
+    banks = da.load_banks()
+    # โลโก้แยกออกมาต่างหาก ไม่ยัดใส่ dict ของ bank — ไม่งั้นตอนบันทึกจะถูกเขียนกลับลง banks_config.json
+    logos = {b["code"]: _logo_url(b["code"]) for b in banks if b.get("code")}
+    return {"banks": banks, "settings": da.load_settings(), "logos": logos}
 
 
 def _validate_banks(banks) -> str | None:

@@ -1,66 +1,204 @@
 {% extends "base.html" %}
+{% block title %}ภาพรวม — CheckRate{% endblock %}
+
+{% macro logo(item) %}
+  {% if item.logo %}
+    <img class="ov-logo" data-code="{{ item.bank.code }}" src="{{ item.logo }}" alt="{{ item.bank.code }}">
+  {% else %}
+    <div class="ov-logo mono" data-code="{{ item.bank.code }}">{{ item.bank.code[0] }}</div>
+  {% endif %}
+{% endmacro %}
+
 {% block content %}
-<h1>ภาพรวมอัตราดอกเบี้ยเงินฝาก</h1>
-<p class="page-desc">เปรียบเทียบอัตราปัจจุบันกับประกาศก่อนหน้าของแต่ละธนาคาร · แถวที่มีการเปลี่ยนแปลงจะถูกไฮไลต์</p>
 
-<div class="toolbar">
-  <button id="run-all" class="btn primary">▶ รันเปรียบเทียบอัตราทันที</button>
-  <span id="run-status" class="status-pill idle">พร้อมทำงาน</span>
+<!-- ── hero: สรุปทั้งเดือนในประโยคเดียว + KPI ── -->
+<div class="ov-hero">
+  <div>
+    <div class="ov-hero-meta">
+      {{ month|thai_month }}
+      {% if kpi.last_checked %} · ตรวจสอบล่าสุด {{ kpi.last_checked|thai_datetime }}{% endif %}
+    </div>
+    {% if kpi.announcements %}
+      <h1>ธนาคารประกาศดอกเบี้ย <b>{{ kpi.announcements }} ครั้ง</b>
+        {% if kpi.changed_items %}
+          <br>ทำให้ <b class="accent">{{ kpi.changed_items }} รายการ</b> เปลี่ยนแปลงในเดือนนี้
+        {% else %}
+          <br>แต่อัตราที่ติดตาม <b>คงเดิมทั้งหมด</b>
+        {% endif %}
+      </h1>
+    {% else %}
+      <h1>ยังไม่มีธนาคารใดประกาศดอกเบี้ยในเดือนนี้</h1>
+    {% endif %}
+    <div class="ov-hero-actions">
+      <button id="run-all" class="btn primary"><span class="btn-dot"></span>รันตรวจสอบทันที</button>
+      <span id="run-status" class="status-pill idle">พร้อมทำงาน</span>
+    </div>
+    {# ไม่มี #run-output ในหน้านี้ตั้งใจ — run.js จะข้ามการโชว์ log ให้เอง เหลือแค่สรุปผลใน #run-notice #}
+    <div id="run-notice"></div>
+  </div>
+
+  <div class="ov-kpis">
+    <div class="ov-kpi">
+      <div class="ov-kpi-num">{{ kpi.announcements }}<span> ครั้ง</span></div>
+      <div class="ov-kpi-label">ประกาศเดือนนี้</div>
+    </div>
+    <div class="ov-kpi">
+      <div class="ov-kpi-num {{ 'up' if kpi.up }}">{{ kpi.up }}<span> ขึ้น</span></div>
+      <div class="ov-kpi-label">รายการที่เปลี่ยน</div>
+    </div>
+    <div class="ov-kpi">
+      <div class="ov-kpi-num {{ 'down' if kpi.down }}">{{ kpi.down }}<span> ลง</span></div>
+      <div class="ov-kpi-label">รายการที่เปลี่ยน</div>
+    </div>
+    <div class="ov-kpi">
+      <div class="ov-kpi-num">{{ kpi.banks_announced }}<span>/{{ kpi.banks_total }}</span></div>
+      <div class="ov-kpi-label">ธนาคารที่มีประกาศ</div>
+    </div>
+  </div>
 </div>
-<div id="run-output" class="output-box" style="display:none"></div>
 
-{% for item in banks %}
-  {% set bank = item.bank %}
-  <div class="bank-card">
-    <div class="bank-head">
-      <div class="bank-title">
-        {{ bank.name }} <span class="code">({{ bank.code }})</span>
-        {% if not item.has_data %}<span class="badge nodata">ยังไม่มีข้อมูล</span>{% endif %}
-        {% if not bank.enabled %}<span class="badge nodata">ปิดใช้งาน</span>{% endif %}
+<!-- ── การ์ดธนาคาร: จำนวนประกาศในเดือนนี้ ── -->
+<div class="ov-cards">
+  {% for item in banks %}
+  <a class="ov-card" href="/bank/{{ item.bank.code }}?month={{ month }}">
+    <div class="ov-bank">
+      {{ logo(item) }}
+      <div>
+        <div class="ov-bank-name">{{ item.bank.name|replace('ธนาคาร', '') }}</div>
+        <div class="ov-bank-code">{{ item.bank.code }}</div>
       </div>
-      {% if item.has_data %}
-      <div class="bank-meta">
-        มีผล: <b>{{ item.effective_date or '-' }}</b>
-        {% if item.prev_date %} · ก่อนหน้า: {{ item.prev_date }}{% endif %}<br>
-        ตรวจล่าสุด: {{ item.last_checked or '-' }}
-        · <a class="link" href="/bank/{{ bank.code }}">รายละเอียด →</a>
-      </div>
-      {% endif %}
     </div>
 
-    {% if item.has_data %}
-    <table class="rates">
-      <thead>
-        <tr>
-          <th>ประเภท</th>
-          <th class="num">อัตราปัจจุบัน<br><span class="col-date">({{ item.effective_date or '-' }})</span></th>
-          <th class="num">อัตราก่อนหน้า<br><span class="col-date">({{ item.prev_date or '-' }})</span></th>
-          <th class="num">เปลี่ยนแปลง</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in item.rows %}
-        <tr class="{{ 'changed' if r.changed else '' }}">
-          <td>{{ r.label }}</td>
-          <td class="num">{{ (r.current ~ '%') if r.current is not none else '-' }}</td>
-          <td class="num">{{ (r.previous ~ '%') if r.previous is not none else '-' }}</td>
-          <td class="num">
-            {% if r.change is none %}<span class="chg flat">-</span>
-            {% elif r.change > 0 %}<span class="chg up">▲ +{{ '%.2f'|format(r.change) }}%</span>
-            {% elif r.change < 0 %}<span class="chg down">▼ {{ '%.2f'|format(r.change) }}%</span>
-            {% else %}<span class="chg flat">0.00%</span>{% endif %}
-          </td>
-        </tr>
+    <div class="ov-card-cap">ประกาศดอกเบี้ยเดือนนี้</div>
+    <div class="ov-card-big {{ 'zero' if not item.announce_count }}">
+      <b>{{ item.announce_count }}</b><span>ครั้ง</span>
+    </div>
+
+    <div class="ov-mini">
+      <div>
+        <div class="ov-mini-label">เปลี่ยน</div>
+        <div class="ov-mini-num {{ 'zero' if not item.changed_items }}">{{ item.changed_items }}<span> รายการ</span></div>
+      </div>
+      <div>
+        <div class="ov-mini-label">ขึ้น / ลง</div>
+        {% if item.up or item.down %}
+          <div class="ov-updown">
+            <span class="{{ 'u' if item.up else 'off' }}">{{ item.up }}▲</span>
+            <span class="{{ 'd' if item.down else 'off' }}">{{ item.down }}▼</span>
+          </div>
+        {% else %}
+          <div class="ov-updown flat">คงเดิม</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="ov-card-foot">
+      {% if item.last_announce %}ประกาศล่าสุด {{ item.last_announce|thai_date }}{% else %}ยังไม่มีประกาศ{% endif %}
+    </div>
+  </a>
+  {% else %}
+  <div class="ov-card"><div class="empty">ยังไม่มีธนาคารที่เปิดใช้งานและมีข้อมูล — ตั้งค่าได้ที่หน้าจัดการอัตรา</div></div>
+  {% endfor %}
+</div>
+
+<!-- ── สรุปการเปลี่ยนแปลงรายธนาคาร + ตัวกรองเดือน ── -->
+<div class="ov-panel">
+  <div class="ov-panel-head">
+    <div class="ov-panel-title">สรุปการเปลี่ยนแปลงรายธนาคาร</div>
+    <div class="ov-months">
+      {% for m in month_options[:2] %}
+        <a class="{{ 'on' if m == month }}" href="/?month={{ m }}">{{ m|thai_month_short }}</a>
+      {% endfor %}
+      {% if month not in month_options[:2] %}
+        <a class="on" href="/?month={{ month }}">{{ month|thai_month_short }}</a>
+      {% endif %}
+      <select id="month-select" aria-label="เลือกเดือน">
+        <option value="">เลือกเดือน ▾</option>
+        {% for m in month_options %}
+          <option value="{{ m }}" {{ 'selected' if m == month }}>{{ m|thai_month }}</option>
         {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty">ยังไม่มีไฟล์ CSV สำหรับธนาคารนี้ — กด "รันเปรียบเทียบอัตราทันที" เพื่อดึงข้อมูลครั้งแรก (ต้องเปิดใช้งานและตั้งค่า URL ในหน้าจัดการอัตรา)</div>
+      </select>
+    </div>
+  </div>
+
+  <div class="ov-grid ov-cols">
+    <div>ผลิตภัณฑ์ / ระยะ</div>
+    <div class="r">ครั้งก่อน</div>
+    <div class="r">ปัจจุบัน</div>
+    <div class="c">ประกาศ</div>
+    <div class="r">เปลี่ยนสุทธิ</div>
+  </div>
+
+  {% for item in banks %}
+  <div class="ov-group">
+    <div class="ov-group-bank">
+      {{ logo(item) }}
+      <a href="/bank/{{ item.bank.code }}?month={{ month }}">{{ item.bank.name|replace('ธนาคาร', '') }}</a>
+      <span class="code">{{ item.bank.code }}</span>
+    </div>
+    <div class="ov-pills">
+      <span class="ov-pill {{ 'off' if not item.changed_items }}">{{ item.changed_items }} รายการ</span>
+      <span class="ov-pill {{ 'off' if not item.total_times }}">{{ item.total_times }} ครั้ง</span>
+    </div>
+  </div>
+
+  {% for p in item.products %}
+  <div class="ov-row">
+    <div class="ov-grid">
+      <div class="ov-prod">
+        <div class="ov-prod-name">
+          {{ p.label }}
+          {% if p.times > 1 %}<span class="ov-tag">ประกาศซ้ำ</span>{% endif %}
+        </div>
+        {% if p.depositor %}<div class="ov-prod-sub">{{ p.depositor }}</div>{% endif %}
+      </div>
+      <div class="ov-num prev">{{ (p.previous ~ '%') if p.previous else '—' }}</div>
+      <div class="ov-num cur">{{ (p.current ~ '%') if p.current else '—' }}</div>
+      <div class="ov-times {{ 'multi' if p.times > 1 }}">{{ p.times }} ครั้ง</div>
+      <div class="ov-net {{ 'up' if p.net and p.net > 0 else ('down' if p.net and p.net < 0 else 'flat') }}">
+        {{ '%+.2f%%'|format(p.net) if p.net is not none else '—' }}
+      </div>
+    </div>
+
+    {# ประกาศซ้ำในเดือนเดียว — กางให้เห็นว่าขยับกี่ครั้ง ครั้งละเท่าไร #}
+    {% if p.times > 1 %}
+    <div class="ov-timeline">
+      <div class="ov-timeline-cap">ประวัติการประกาศเดือนนี้</div>
+      {% for t in p.timeline %}
+      <div class="ov-tl-row">
+        <span class="date">{{ t.date|thai_date }}</span>
+        <span class="from">{{ t.before }}%</span>
+        <span class="arrow">→</span>
+        <span class="to">{{ t.after }}%</span>
+        <span class="delta {{ 'up' if t.delta > 0 else 'down' }}">{{ '%+.2f%%'|format(t.delta) }}</span>
+      </div>
+      {% endfor %}
+    </div>
     {% endif %}
   </div>
-{% else %}
-  <div class="bank-card"><div class="empty">ยังไม่มีธนาคารใน config</div></div>
-{% endfor %}
+  {% else %}
+  <div class="ov-quiet">
+    {% if item.no_prev %}
+      ประกาศแรกที่เก็บไว้ในระบบ — ยังไม่มีอัตราก่อนหน้าให้เทียบ
+    {% elif item.announce_count %}
+      มีประกาศ {{ item.announce_count }} ฉบับ แต่อัตราที่ติดตามคงเดิมทั้งหมด
+    {% else %}
+      ไม่มีประกาศในเดือนนี้{% if item.last_announce %} · ประกาศล่าสุด {{ item.last_announce|thai_date_full }}{% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endfor %}
+</div>
+
+{% if other_banks %}
+<div class="ov-others">
+  <span>ไม่ได้แสดง:</span>
+  {% for item in other_banks %}
+    <span class="ov-pill">{{ item.bank.name }}{% if not item.bank.enabled %} · ปิดใช้งาน{% endif %}{% if not item.has_data %} · ยังไม่มีข้อมูล{% endif %}</span>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block scripts %}

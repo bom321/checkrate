@@ -292,9 +292,11 @@ def backfill_bank(bank: dict, year: int | None = None):
         force = bool(year) and date_iso.startswith(f"{year}-")
         hit = cache.get(fname)
         rates = None
+        parsed_ok = False
         if not force and hit and hit.get("sha256") == sha \
                 and hit.get("targets_sig") == tgt_sig and hit.get("parser_sig") == parser_sig:
             rates = hit.get("rates")
+            parsed_ok = True
             cached += 1
             log.info(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → ใช้ผลจาก cache")
         else:
@@ -302,21 +304,31 @@ def backfill_bank(bank: dict, year: int | None = None):
             rates = banks.extract_rates(pdf_bytes, bank)
             took = time.monotonic() - t0
             if rates is None:
-                log.warning(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → ⚠ ไม่พบอัตรา ({took:.1f}s)")
-                continue
-            summary = "  ".join(f"{t['key']}={rates[t['key']]:.2f}%"
-                                for t in targets if t["key"] in rates)
-            log.info(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → {summary} [อ่านใหม่ {took:.1f}s]")
+                # ไม่ continue ทันที — ไปเช็คค่าที่กรอกเอง (manual override) ก่อน เผื่อ admin กรอกทับไฟล์
+                # ที่ parser อ่านไม่ได้เลย (เช่น ฟอนต์ PDF พัง ไม่มี ToUnicode) rates={} ให้ apply_manual
+                # ข้างล่างมีของให้ทับ ถ้าไม่มี manual จริง ๆ ก็ยัง fail เหมือนเดิม (final_rates จะว่างแล้วข้าม)
+                log.warning(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → ⚠ ไม่พบอัตรา ({took:.1f}s) "
+                            f"— เช็คค่าที่กรอกเอง (manual override) ก่อนข้าม")
+                rates = {}
+            else:
+                parsed_ok = True
+                summary = "  ".join(f"{t['key']}={rates[t['key']]:.2f}%"
+                                    for t in targets if t["key"] in rates)
+                log.info(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → {summary} [อ่านใหม่ {took:.1f}s]")
 
-        # cache เก็บ 'rates' ดิบ (ผล OCR ล้วน) — apply_manual ทีหลังเสมอ ไม่งั้น cache จะปนค่าที่คนกรอก
-        # เข้าไป แล้วสืบไม่ได้อีกว่าเลขไหนมาจากเครื่องอ่าน เลขไหนมาจากคน (ดู common.py หัวข้อ manual override)
-        new_cache[fname] = {"sha256": sha, "targets_sig": tgt_sig,
-                            "parser_sig": parser_sig, "rates": rates}
+        if parsed_ok:
+            # cache เก็บ 'rates' ดิบ (ผล OCR ล้วน) — apply_manual ทีหลังเสมอ ไม่งั้น cache จะปนค่าที่คนกรอก
+            # เข้าไป แล้วสืบไม่ได้อีกว่าเลขไหนมาจากเครื่องอ่าน เลขไหนมาจากคน (ดู common.py หัวข้อ manual override)
+            # — ไม่ cache ไฟล์ที่ parser อ่านไม่ได้เลย กันรอบถัดไปนึกว่าพาร์สสำเร็จทั้งที่จริงมาจาก manual ล้วน ๆ
+            new_cache[fname] = {"sha256": sha, "targets_sig": tgt_sig,
+                                "parser_sig": parser_sig, "rates": rates}
 
         final_rates, applied = common.apply_manual(code, date_iso, rates)
         if applied:
             log.info(f"[{code}] Backfill: ประกาศ {date_iso} → ใช้ค่าที่กรอกเองทับ {len(applied)} รายการ: "
                      f"{', '.join(applied)}")
+        if not final_rates:
+            continue  # parser อ่านไม่ได้เลยและไม่มี manual มาช่วย — ไม่มีอะไรจะเขียนลง CSV จริง ๆ
 
         row, _ = common.build_csv_row(date_iso, final_rates, prev_rates, targets)
         rows.append(row)

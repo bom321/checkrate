@@ -37,6 +37,27 @@ PARSER_IDS = ["kbank"]
 DEFAULT_ROW_TEMPLATE = "เงินฝากประจำ {tenor} เดือน"
 DEFAULT_PDF_URL_TEMPLATE = "https://www.kasikornbank.com/th/rate/deposits/{date}-deposit-rates-th.pdf"
 
+# รูปแบบวันที่ใน URL ของ KBANK เปลี่ยนไปกลางทาง (ยืนยันจากไฟล์จริง): ไฟล์เก่า (ก่อน ~2024-01-29)
+# ใช้ "%Y%m%d" (เช่น 20230330) ส่วนไฟล์ใหม่ใช้ "%d%m%Y" (เช่น 29012024) ลองรูปแบบใหม่ก่อนเสมอ
+# (ไม่เปลี่ยนพฤติกรรมเดิมสำหรับไฟล์ปัจจุบัน) แล้วค่อย fallback ไปรูปแบบเก่าเพื่อให้ discover_year/
+# resolve_latest_url เข้าถึงไฟล์ปีเก่า (2023 ลงไป) ได้ด้วย
+_DATE_FORMATS = ["%d%m%Y", "%Y%m%d"]
+
+
+def _probe_pdf_url(base: str, referer: str, d, cffi_requests):
+    """ลอง URL ของวันที่ d ด้วยทุกรูปแบบใน _DATE_FORMATS ตามลำดับ คืน (url, content) ตัวแรกที่เป็น %PDF
+    ไม่งั้นคืน (None, None). ใช้ร่วมกันทั้ง resolve_latest_url และ discover_year"""
+    for fmt in _DATE_FORMATS:
+        url = base.format(date=d.strftime(fmt))
+        try:
+            r = cffi_requests.get(url, impersonate="chrome", timeout=15,
+                                  headers={"Referer": referer, "Accept": "application/pdf,*/*"})
+        except Exception:
+            continue
+        if r.content[:4] == b"%PDF":
+            return url, r.content
+    return None, None
+
 
 # ─────────────────────────── Column resolution (พิกัด x บนหน้า PDF) ───────────────────────────
 # แต่ละคอลัมน์ระบุด้วย "anchor keyword" คำเดี่ยวที่ไม่กำกวมในโซน header ของหน้า (ยืนยันจาก PDF จริง
@@ -198,15 +219,10 @@ def resolve_latest_url(bank: dict) -> str | None:
     for i, d in enumerate(days):
         if i >= MAX_PROBES_PER_RUN:
             break
-        url = base.format(date=d.strftime("%d%m%Y"))
-        try:
-            r = cffi_requests.get(url, impersonate="chrome", timeout=15,
-                                  headers={"Referer": referer, "Accept": "application/pdf,*/*"})
-        except Exception:
-            continue
+        url, content = _probe_pdf_url(base, referer, d, cffi_requests)
         if d <= today:
             probed_reached = max(probed_reached, d)
-        if r.content[:4] == b"%PDF":
+        if content is not None:
             found_url, found_date = url, d
             if stop_at_first_hit:
                 break
@@ -253,18 +269,12 @@ def discover_year(bank: dict, year: int | None = None) -> list[str]:
     checked = 0
     while d <= end:
         checked += 1
-        url = base.format(date=d.strftime("%d%m%Y"))
-        try:
-            r = cffi_requests.get(url, impersonate="chrome", timeout=15,
-                                  headers={"Referer": referer, "Accept": "application/pdf,*/*"})
-        except Exception:
-            d += timedelta(days=1)
-            continue
-        if r.content[:4] == b"%PDF":
+        _, content = _probe_pdf_url(base, referer, d, cffi_requests)
+        if content is not None:
             fname = f"{code.lower()}_deposit_{d.isoformat()}.pdf"
             if fname not in existing:
                 with open(os.path.join(pdf_dir, fname), "wb") as f:
-                    f.write(r.content)
+                    f.write(content)
                 saved.append(fname)
                 existing.add(fname)
                 log.info(f"kbank.discover_year: พบและบันทึก {fname} ({checked}/{total_days})")

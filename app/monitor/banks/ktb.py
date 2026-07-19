@@ -109,18 +109,29 @@ def _get_rates_page(session, code: str):
     return r
 
 
-_HREF_RE = re.compile(r'href="(/Download/rateFee/RateFeeDownload_(\d+)([^"]*?\.pdf))"')
+# แต่ละรายการดาวน์โหลดในหน้า/AJAX เป็นบล็อกที่มี <div ... content-desc">คำอธิบาย</div> ตามด้วย
+# <a href="...RateFeeDownload_<asset_id>...pdf"> — จับคู่คำอธิบายกับ href ในบล็อกเดียวกัน (คำอธิบาย
+# มาก่อน href เสมอ, .*? จึงจับ href แรกในบล็อกเดียวกัน) content-desc"> เจาะจงพอไม่ชน content-desc5">
+# (ช่องขนาดไฟล์) เพราะหลัง content-desc ต้องเป็น "> ทันที
+_ITEM_RE = re.compile(
+    r'content-desc">\s*([^<]+?)\s*</div>.*?'
+    r'href="(/Download/rateFee/RateFeeDownload_(\d+)[^"]*?\.pdf)"',
+    re.S,
+)
 
 
 def _extract_pdf_links(html: str) -> list[tuple[int, str]]:
-    """หา href ของ PDF อัตราดอกเบี้ยเงินฝาก (กรองตารางเงินตราต่างประเทศ/เอกสารอื่นที่ปนอยู่ในหน้าเดียวกันทิ้ง)
-    คืน (asset_id, absolute_url) — href มี Thai ดิบไม่ percent-encode จึงต้อง quote() ก่อนใช้ยิง request"""
+    """หา href ของ PDF อัตราดอกเบี้ยเงินฝากสกุลเงินบาท (กรองตารางเงินตราต่างประเทศ/เอกสารอื่นที่ปนอยู่ในหน้าเดียวกันทิ้ง)
+    คืน (asset_id, absolute_url) — กรองด้วย "คำอธิบาย" ของรายการ (เชื่อถือได้ทุกปี) ไม่ใช่ชื่อไฟล์:
+    ประกาศเก่า (≤พ.ศ.2566/ค.ศ.2023) ตั้งชื่อไฟล์แบบ hash สั้น (เช่น RateFeeDownload_4669de16_01_66_TH.pdf)
+    ไม่มีคำไทยในชื่อไฟล์เลย จึงตกตัวกรองชื่อไฟล์เดิมทิ้งเงียบ ๆ — คำอธิบายในหน้าเว็บเหมือนกันทุกปี
+    href มี Thai ดิบไม่ percent-encode จึงต้อง quote() ก่อนใช้ยิง request"""
     out: list[tuple[int, str]] = []
-    for m in _HREF_RE.finditer(html):
-        path, asset_id_s, fname = m.group(1), m.group(2), m.group(3)
-        if not kw_in_line("ตารางอัตราดอกเบี้ยเงินฝาก", fname):
+    for m in _ITEM_RE.finditer(html):
+        desc, path, asset_id_s = m.group(1), m.group(2), m.group(3)
+        if not kw_in_line("อัตราดอกเบี้ยเงินฝาก", desc):
             continue
-        if kw_in_line("ต่างประเทศ", fname):
+        if kw_in_line("ต่างประเทศ", desc):
             continue
         out.append((int(asset_id_s), SITE_BASE + quote(path, safe="/")))
     return out

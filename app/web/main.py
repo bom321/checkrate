@@ -694,16 +694,19 @@ async def api_save_settings(request: Request):
 
 
 def _year_options(code: str | None = None) -> list[int]:
-    """ปีที่เลือกได้สำหรับ backfill/discover-year — ปีปัจจุบันย้อนไปถึงปีที่เก่าที่สุดที่มี PDF (อย่างน้อย 3 ปี)
+    """ปีที่เลือกได้สำหรับ backfill/discover-year — ปีปัจจุบันย้อนไปถึงปีที่เก่าที่สุดที่มี PDF (อย่างน้อย 12 ปี)
     ใช้ร่วมกันในทุกหน้า (Logs + bank detail) เพื่อให้ dropdown ปีตรงกันทุกธนาคาร — รวมทุกธนาคารเสมอ
     (parametr code สำรองไว้สำหรับใช้ future แต่ตอนนี้ไม่มีใครเรียกด้วย code)
-    floor อย่างน้อย 3 ปีไว้เสมอ เพราะ discover-year ต้องเลือกปีที่ *ยังไม่มี* PDF ได้ด้วย
-    discover-year ใช้เลือกปีที่จะไปดาวน์โหลด ส่วน backfill ใช้เลือกปีที่จะบังคับอ่านใหม่"""
+    floor อย่างน้อย 12 ปีไว้เสมอ (เดิม 3 ปี) เพราะ discover-year ต้องเลือกปีที่ *ยังไม่มี* PDF ในเครื่อง
+    ได้ด้วย — ยืนยันแล้วว่าต้นทางธนาคาร (เช่น SCB) มีประกาศย้อนหลังในเว็บถึงปี 2016 แต่ dropdown เดิม
+    floor แค่ now-2 ทำให้กดเลือกปีเก่ากว่านั้นไม่ได้เลยแม้ต้นทางจะมีไฟล์อยู่จริง (chicken-and-egg: ปีจะ
+    โผล่ก็ต่อเมื่อมี PDF ปีนั้นในเครื่องแล้ว) discover-year ใช้เลือกปีที่จะไปดาวน์โหลด ส่วน backfill ใช้
+    เลือกปีที่จะบังคับอ่านใหม่"""
     now = datetime.now().year
     codes = [b["code"] for b in da.load_banks()]
     years = {int(g["year"]) for c in codes
              for g in da.list_pdfs_by_year(c) if str(g["year"]).isdigit()}
-    oldest = min(years | {now - 2})
+    oldest = min(years | {now - 12})
     return list(range(now, oldest - 1, -1))
 
 

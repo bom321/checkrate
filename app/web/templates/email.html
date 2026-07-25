@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}ตั้งค่าอีเมล — CheckRate{% endblock %}
+{% block content %}
+
+<div class="pg-head">
+  <div>
+    <h1>ตั้งค่าอีเมล</h1>
+    <p class="page-desc">กำหนดผู้รับอีเมลแจ้งเตือน และเลือกช่องทาง SMTP ที่ใช้ส่งจริง · ทดสอบส่งได้ทันทีจากหน้านี้</p>
+  </div>
+</div>
+
+<div id="msg"></div>
+
+{# สองคอลัมน์ตาม mockup 9b — ซ้ายตั้งค่า ขวาแผงสรุป+ทดสอบ (sticky) #}
+<div class="em-grid">
+
+  <div class="em-main">
+    <div class="cfg-email">
+      <div class="cfg-email-head">
+        <span class="cfg-email-title">ผู้รับอีเมลแจ้งเตือน</span>
+        <span class="cfg-email-hint">คั่นด้วย ,</span>
+      </div>
+      <div class="em-recip-row">
+        {# chip ถูกวาดโดย email.js — input อยู่ท้ายสุดเสมอ #}
+        <div class="em-chipfield" id="email-chips">
+          <input type="text" id="email-add" placeholder="เพิ่มอีเมล แล้วกด Enter" autocomplete="off">
+        </div>
+        <button id="save-recipients" class="btn primary">บันทึก</button>
+      </div>
+      <div class="cfg-email-eff" id="recipients-eff"></div>
+    </div>
+
+    <div class="cfg-email">
+      <div class="cfg-email-head">
+        <span class="cfg-email-title">ช่องทางส่งอีเมล (SMTP)</span>
+        <span class="cfg-email-hint">ตั้งคีย์ผ่าน env</span>
+      </div>
+      <div class="em-provs">
+        <label class="em-prov">
+          <input type="radio" name="email-provider" value="gmail" checked>
+          <span class="em-prov-dot" aria-hidden="true"></span>
+          <span class="em-prov-name">Gmail<span class="em-badge">หลัก</span></span>
+          <span class="em-env">SMTP_*</span>
+        </label>
+        <label class="em-prov">
+          <input type="radio" name="email-provider" value="mailplus">
+          <span class="em-prov-dot" aria-hidden="true"></span>
+          <span class="em-prov-name">MailPlus (Synology)</span>
+          <span class="em-env">SMTP2_*</span>
+        </label>
+      </div>
+      <div class="em-prov-actions">
+        <button id="save-provider" class="btn">บันทึกช่องทาง</button>
+      </div>
+    </div>
+  </div>
+
+  <aside class="em-side">
+    <div class="em-side-title">สรุปการตั้งค่า</div>
+    <div class="em-sum">
+      <div class="em-sum-row">
+        <span class="em-sum-k">ช่องทางที่ใช้</span>
+        <span class="em-sum-v" id="sum-provider">—</span>
+      </div>
+      <div class="em-sum-row">
+        <span class="em-sum-k">จำนวนผู้รับ</span>
+        <span class="em-sum-v" id="sum-count">—</span>
+      </div>
+      <div class="em-sum-row">
+        <span class="em-sum-k">ทดสอบล่าสุด</span>
+        <span class="em-sum-v idle" id="sum-test">ยังไม่ได้ทดสอบ</span>
+      </div>
+    </div>
+    <button id="test-email" class="em-test">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/>
+      </svg>ทดสอบส่งอีเมล
+    </button>
+    {# คอนโซลอยู่ตลอดตามดีไซน์ 9b — ยังไม่ได้ทดสอบก็แสดงข้อความรอไว้ #}
+    <div id="email-output" class="em-console empty">ยังไม่มีผลทดสอบ · กดปุ่มด้านบนเพื่อส่งอีเมลทดสอบ</div>
+    <p class="em-note">อีเมลทดสอบจะถูกส่งด้วยการตั้งค่าที่บันทึกไว้ล่าสุด — บันทึกก่อนกดทดสอบ</p>
+  </aside>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/email.js"></script>
+{% endblock %}

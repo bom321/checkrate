@@ -184,19 +184,18 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 
 /* ══════════════ จัดการอัตรา (mockup 6b) ══════════════ */
 
-/* ผู้รับอีเมล */
+/* การ์ดตั้งค่าอีเมล — ใช้เฉพาะหน้า /email (mockup 9b) ระยะห่างมาจาก .em-main gap */
 .cfg-email {
   background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-  padding: 16px 20px; margin-bottom: 14px;
+  padding: 20px 22px; box-shadow: var(--shadow);
 }
 .cfg-email-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
 }
-.cfg-email-title { font-size: 12.5px; font-weight: 600; color: #3C3F45; }
-.cfg-email-hint { font-size: 11px; color: var(--muted); }
-.cfg-email-row { display: flex; gap: 10px; }
-.cfg-email-row .btn { flex: none; }
+.cfg-email-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+.cfg-email-hint { font-size: 11.5px; color: var(--muted); }
+.cfg-email-eff { margin-top: 10px; font-size: 11.5px; color: var(--muted); }
 
 /* คำอธิบายช่องที่กรอกยาก */
 .cfg-legend {
@@ -367,6 +366,132 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 .log-line .lvl.ERROR { color: var(--down); }
 .log-line .lvl.DEBUG { color: var(--muted-soft); }
 .log-line .msg { color: #3C3F45; word-break: break-word; }
+
+
+/* ══════════════ ตั้งค่าอีเมล (mockup 9b) ══════════════ */
+/* สองคอลัมน์: ซ้ายการ์ดตั้งค่า · ขวาแผงสรุปสีเข้มแบบ sticky (เห็นสถานะปัจจุบันตลอด) */
+.em-grid {
+  display: grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: start;
+}
+.em-main { display: flex; flex-direction: column; gap: 18px; }
+
+/* ── ช่อง chip ผู้รับ ── */
+.em-recip-row { display: flex; gap: 10px; align-items: flex-start; }
+.em-recip-row .btn { flex: none; padding: 11px 22px; font-weight: 600; }
+.em-chipfield {
+  flex: 1; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+  padding: 8px 10px; min-height: 44px;
+  border: 1px solid var(--line-strong); border-radius: 9px; background: #FBFAF7;
+  cursor: text;
+}
+.em-chipfield:focus-within { outline: 2px solid #BEE3CE; border-color: var(--brand); }
+.em-chipfield input[type=text] {
+  flex: 1; min-width: 150px; width: auto;
+  border: none; outline: none; background: transparent; padding: 4px 2px; font-size: 13px;
+}
+.em-chipfield input[type=text]:focus { outline: none; border: none; }
+.em-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 500; color: var(--ink);
+  background: var(--brand-soft); border: 1px solid #CFE6DA;
+  padding: 4px 6px 4px 7px; border-radius: 20px;
+}
+.em-chip-av {
+  width: 18px; height: 18px; flex: none; border-radius: 50%;
+  background: #D6EADE; color: var(--brand-ink);
+  font: 600 9px var(--sans); display: flex; align-items: center; justify-content: center;
+}
+.em-chip-x {
+  width: 15px; height: 15px; flex: none; border: none; padding: 0; cursor: pointer;
+  border-radius: 50%; background: #CDE3D8; color: var(--brand-ink);
+  font-family: inherit; font-size: 11px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.em-chip-x:hover { background: var(--down-soft); color: var(--down); }
+
+/* ── การ์ดเลือกช่องทาง SMTP (radio จริงซ่อนอยู่ข้างใต้ — JS/คีย์บอร์ดยังใช้ได้ตามเดิม) ── */
+.em-provs { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.em-prov {
+  display: flex; align-items: center; gap: 11px; cursor: pointer;
+  padding: 13px 15px; border-radius: 11px;
+  border: 1.5px solid var(--line-strong); background: #FBFAF7;
+}
+.em-prov input { position: absolute; opacity: 0; width: 0; height: 0; }
+/* ดีไซน์วาดจุดด้วย border หนา (content-box) — จุดที่เลือกจึงใหญ่กว่าจุดที่ไม่ได้เลือกชัดเจน
+   ต้องล้าง box-sizing:border-box ของ * ทิ้ง ไม่งั้นวงกลมหดเหลือ 18px เท่ากันทั้งคู่ */
+.em-prov-dot {
+  box-sizing: content-box;
+  width: 18px; height: 18px; flex: none; border-radius: 50%;
+  border: 1.5px solid #C6C2BA; background: #fff;
+}
+.em-prov.on { border-color: var(--brand); background: var(--brand-soft); }
+.em-prov.on .em-prov-dot { border: 5px solid var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.em-prov:focus-within { outline: 2px solid #BEE3CE; outline-offset: 2px; }
+.em-prov-name {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; font-weight: 600; color: var(--ink);
+}
+.em-badge {
+  font: 600 9.5px var(--sans); letter-spacing: .05em;
+  color: var(--brand-ink); background: #D6EADE; padding: 2px 7px; border-radius: 5px;
+}
+.em-env {
+  flex: none; font: 500 11px var(--mono); color: #3C3F45;
+  background: #F0EEE9; padding: 2px 7px; border-radius: 5px;
+}
+.em-prov.on .em-env { background: #EAF2ED; }
+.em-prov-actions { display: flex; justify-content: flex-end; }
+
+/* ── แผงสรุป + ทดสอบ (ชิดขวา) ── */
+.em-side {
+  background: var(--ink); border-radius: 14px; padding: 22px;
+  box-shadow: 0 12px 30px -18px rgba(0,0,0,.5);
+  position: sticky; top: 16px;
+}
+.em-side-title { font-size: 13px; font-weight: 600; color: #F4F3EF; margin-bottom: 16px; }
+.em-sum {
+  display: flex; flex-direction: column; gap: 1px;
+  background: rgba(255,255,255,.08); border-radius: 10px; overflow: hidden; margin-bottom: 18px;
+}
+.em-sum-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 12px 14px; background: #1E2026;
+}
+.em-sum-k { font-size: 12px; color: #9297A0; }
+.em-sum-v {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; color: #F4F3EF; text-align: right;
+}
+.em-sum-v.ok::before, .em-sum-v.err::before,
+.em-sum-v.idle::before, .em-sum-v.running::before {
+  content: ''; width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor;
+}
+.em-sum-v.ok { color: #7BD3A6; }
+.em-sum-v.err { color: #E89A88; }
+.em-sum-v.running { color: #E3C08A; }
+.em-sum-v.idle { color: #7C828C; font-weight: 500; }
+
+.em-test {
+  width: 100%; border: none; cursor: pointer;
+  background: var(--brand); color: #fff;
+  font-family: inherit; font-size: 13.5px; font-weight: 600;
+  padding: 13px; border-radius: 10px; margin-bottom: 12px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.em-test:hover { background: var(--brand-ink); }
+.em-test:disabled { opacity: .55; cursor: not-allowed; }
+
+/* คอนโซลผลทดสอบ — อยู่ในแผงเข้ม จึงใช้พื้นโปร่งดำแทน .output-box */
+.em-console {
+  font: 400 11px/1.6 var(--mono); color: #7C828C;
+  background: rgba(0,0,0,.35); border-radius: 9px; padding: 11px 13px;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 220px; overflow-y: auto;
+}
+/* ข้อความรอก่อนมีผลทดสอบ — ภาษาไทยในฟอนต์ mono อ่านยาก (ตัวห่าง) จึงกลับไปใช้ sans */
+.em-console.empty { font-family: var(--sans); font-size: 11.5px; }
+.em-note { font-size: 10.5px; line-height: 1.5; color: #6E7480; margin: 14px 0 0; }
 
 
 /* ══════════════ แถบเมนูล่าง (มือถือ) ══════════════ */
@@ -698,6 +823,10 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .ov-hero h1 { font-size: 32px; }
   .ov-kpis { gap: 20px; }
   .ov-kpi + .ov-kpi { padding-left: 20px; }
+
+  /* ตั้งค่าอีเมล — ยุบเป็นคอลัมน์เดียว แผงสรุปไหลลงล่าง (sticky ไม่มีความหมายแล้ว) */
+  .em-grid { grid-template-columns: 1fr; }
+  .em-side { position: static; }
 }
 @media (max-width: 720px) {
   .container { padding: 20px 16px 92px; }   /* เผื่อที่ให้ .botnav ไม่ทับเนื้อหา */
@@ -740,6 +869,10 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .lg-actions .btn { flex: 1 1 100%; }
   .lg-actions .lg-year { flex: 1 1 100%; }
   .lg-actions .status-pill { margin-left: 0; }
+
+  /* ปุ่มบันทึกผู้รับลงมาอยู่ใต้ช่อง chip เต็มความกว้าง */
+  .em-recip-row { flex-wrap: wrap; }
+  .em-recip-row .btn { flex: 1 1 100%; }
   .filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   .filters > * { flex: none; }
   .log-line {
@@ -849,6 +982,13 @@ summary.ov-grid::-webkit-details-marker { display: none; }
     width: 26px; height: 26px; border: 1px solid var(--line-strong); border-radius: 7px;
     font-size: 12px;
   }
+}
+
+/* botnav ของ admin มี 6 ช่อง (ภาพรวม/จัดการอัตรา/ตั้งค่าอีเมล/คำขอ/Log/ออกจากระบบ) — จอแคบกว่านี้
+   ป้ายข้อความชนกัน ลดขนาดตัวอักษร/padding เพื่อให้อยู่ในแถวเดียวโดยไม่ตัดคำ */
+@media (max-width: 420px) {
+  .botnav a, .botnav button.navlink { font-size: 9px; padding: 8px 2px; }
+  .botnav-ic { font-size: 13px; }
 }
 
 /* ── หน้าเข้าสู่ระบบผู้ดูแล (/login) ── */

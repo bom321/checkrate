@@ -7,8 +7,9 @@ main.py — FastAPI backend สำหรับเว็บ Dashboard ติด�
   /bank/{code}     รายละเอียด — กราฟแนวโน้ม (Chart.js) + ตารางประวัติ + ลิงก์ PDF
 
 หน้า/API (เฉพาะผู้ดูแลที่ login แล้ว — ดู auth.py, ยืนยันตัวตนด้วย OTP ทางอีเมล):
-  /config          จัดการ rate_targets / enabled / ลิงก์ดาวน์โหลด + ผู้รับอีเมล
-  /logs            ดู log + ปุ่มรันตรวจสอบ + ทดสอบส่งอีเมล
+  /config          จัดการ rate_targets / enabled / ลิงก์ดาวน์โหลด
+  /email           ตั้งค่าผู้รับอีเมลแจ้งเตือน + ช่องทางส่ง (SMTP provider) + ทดสอบส่งอีเมล
+  /logs            ดู log + ปุ่มรันตรวจสอบ
   /api/config, /api/settings, /api/logs, /api/run, /api/run/status, /api/test-email
 """
 
@@ -627,6 +628,13 @@ async def api_request_status(req_id: str, request: Request):
 def config_page(request: Request):
     return templates.TemplateResponse(request, "config.html", {
         "active": "config",
+    })
+
+
+@app.get("/email", response_class=HTMLResponse, dependencies=[Depends(auth.require_admin_page)])
+def email_page(request: Request):
+    return templates.TemplateResponse(request, "email.html", {
+        "active": "email",
     })
 
 

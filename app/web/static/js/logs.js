@@ -1,4 +1,4 @@
-// logs.js — tail log พร้อม filter, ปุ่มรันตรวจสอบ/ทดสอบส่งอีเมล
+// logs.js — tail log พร้อม filter
 
 (function () {
   const consoleEl = document.getElementById('log-console');
@@ -48,21 +48,6 @@
   autoChk.addEventListener('change', () => {
     clearInterval(autoTimer);
     if (autoChk.checked) autoTimer = setInterval(loadLogs, 10000);
-  });
-
-  document.getElementById('test-email').addEventListener('click', async () => {
-    const btn = document.getElementById('test-email');
-    btn.disabled = true;
-    CheckRateRun.setStatus('running', '⏳ กำลังส่งอีเมลทดสอบ...');
-    try {
-      const res = await fetch('/api/test-email', { method: 'POST' });
-      const data = await res.json();
-      CheckRateRun.setStatus(data.ok ? 'ok' : 'err', data.ok ? '✓ ส่งอีเมลทดสอบสำเร็จ' : '✗ ส่งไม่สำเร็จ');
-      CheckRateRun.showOutput((data.output || '') + '\n\nผู้รับ: ' + (data.recipients || []).join(', '));
-    } catch (e) {
-      CheckRateRun.setStatus('err', 'เชื่อมต่อไม่ได้');
-    }
-    btn.disabled = false;
   });
 
   window.addEventListener('checkrate:run-finished', loadLogs);

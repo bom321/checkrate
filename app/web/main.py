@@ -686,6 +686,11 @@ async def api_save_settings(request: Request):
     settings = da.load_settings()
     if "email_to" in payload:
         settings["email_to"] = payload["email_to"]
+    if "email_provider" in payload:
+        provider = payload["email_provider"]
+        if provider not in ("gmail", "mailplus"):
+            return JSONResponse({"ok": False, "error": "email_provider ต้องเป็น gmail หรือ mailplus"}, status_code=400)
+        settings["email_provider"] = provider
     try:
         da.save_settings(settings)
     except Exception as e:

@@ -232,7 +232,7 @@ def run_bank(bank: dict):
     missing = [t for t in targets if t["key"] not in rates]
     if missing:
         labels = ", ".join(t.get("label", t["key"]) for t in missing)
-        msg = f"⚠ อ่านค่าไม่ได้จากประกาศฉบับนี้ ({len(missing)} รายการ): {labels} — ช่องนี้ถูกปล่อยว่างไว้ ไม่ได้เดาค่า"
+        msg = f"⚠ อ่านค่าไม่ได้จากประกาศฉบับนี้ ({len(missing)} รายการ): {labels} — ช่องนี้ถูกปล่อยว่างไว้"
         warnings.insert(0, msg)
         log.warning(f"[{code}] {msg}")
 

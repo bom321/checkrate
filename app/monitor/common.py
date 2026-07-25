@@ -7,15 +7,18 @@ CSV read/write, settings.json, result JSON (per-bank) และการส่�
 
 ค่าทั้งหมดอ่านจาก environment variable — ไม่ hardcode path หรือรหัสผ่าน:
   DATA_DIR       โฟลเดอร์เก็บ config/CSV/PDF/log/result/settings (ค่าเริ่มต้น = โฟลเดอร์โปรเจกต์)
-  SMTP_HOST      โฮสต์ SMTP (เช่น smtp.gmail.com)
+  SMTP_HOST      โฮสต์ SMTP หลัก (เช่น smtp.gmail.com)
   SMTP_PORT      พอร์ต (465 = SSL, 587 = STARTTLS)
   SMTP_USER      อีเมลผู้ส่ง / ผู้ล็อกอิน
   SMTP_PASSWORD  App Password 16 หลัก
   EMAIL_FROM     ที่อยู่ผู้ส่ง (ค่าเริ่มต้น = SMTP_USER)
   EMAIL_TO       ผู้รับเริ่มต้น (ถ้าไม่มี email_to ใน settings.json)
+  SMTP2_*        ชุด SMTP สำรอง (เช่น Synology MailPlus) — HOST/PORT/USER/PASSWORD/FROM ชื่อเดียวกับข้างบน
+                 บวก SMTP2_INSECURE=1 เพื่อข้ามการตรวจสอบใบรับรอง TLS (self-signed) เลือกใช้งานผ่าน
+                 settings.json คีย์ email_provider ("gmail" ค่าเริ่มต้น | "mailplus")
 """
 
-import subprocess, io, re, csv, os, json, logging, logging.handlers, smtplib
+import subprocess, io, re, csv, os, json, logging, logging.handlers, smtplib, ssl
 import contextlib, contextvars, hashlib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -524,17 +527,37 @@ def get_recipients() -> list[str]:
     return []
 
 
+def _active_smtp_config() -> dict:
+    """เลือกชุด SMTP ที่จะใช้ส่งจริง — คีย์ email_provider ใน settings.json ("gmail" ค่าเริ่มต้น |
+    "mailplus") ไม่มีใน settings.json ก็ fallback env EMAIL_PROVIDER คืน dict ชุดค่าที่เลือกเสมอ
+    (ไม่คืน None แม้ค่าจะว่าง — send_email เป็นคนเช็คครบ/ไม่ครบเอง)"""
+    provider = load_settings().get("email_provider") or os.environ.get("EMAIL_PROVIDER") or "gmail"
+    if provider == "mailplus":
+        prefix, label = "SMTP2_", "mailplus"
+    else:
+        provider, prefix, label = "gmail", "SMTP_", "gmail"
+
+    host = os.environ.get(f"{prefix}HOST")
+    port = int(os.environ.get(f"{prefix}PORT", "465") or "465")
+    user = os.environ.get(f"{prefix}USER")
+    password = os.environ.get(f"{prefix}PASSWORD")
+    sender = os.environ.get(f"{prefix}FROM") or user
+    insecure = os.environ.get(f"{prefix}INSECURE", "0") == "1"
+    return {
+        "provider": provider, "label": label, "host": host, "port": port,
+        "user": user, "password": password, "sender": sender, "insecure": insecure,
+    }
+
+
 def send_email(subject: str, html_body: str, to: list[str] | None = None) -> bool:
-    """ส่งอีเมล HTML ผ่าน SMTP (SSL 465 หรือ STARTTLS 587). ไม่ส่ง `to` = ผู้รับตาม get_recipients() เดิม"""
-    host = os.environ.get("SMTP_HOST")
-    port = int(os.environ.get("SMTP_PORT", "465") or "465")
-    user = os.environ.get("SMTP_USER")
-    password = os.environ.get("SMTP_PASSWORD")
-    sender = os.environ.get("EMAIL_FROM") or user
+    """ส่งอีเมล HTML ผ่าน SMTP (SSL 465 หรือ STARTTLS 587) ใช้ชุด config ที่เลือกไว้ผ่าน
+    _active_smtp_config() (Gmail หรือ MailPlus) ไม่ส่ง `to` = ผู้รับตาม get_recipients() เดิม"""
+    cfg = _active_smtp_config()
+    host, port, user, password, sender = cfg["host"], cfg["port"], cfg["user"], cfg["password"], cfg["sender"]
     recipients = to or get_recipients()
 
     if not host or not user or not password:
-        log.error("send_email failed: SMTP config ไม่ครบ (ต้องมี SMTP_HOST/SMTP_USER/SMTP_PASSWORD)")
+        log.error(f"send_email failed: SMTP config ไม่ครบ ({cfg['label']}) ต้องมี HOST/USER/PASSWORD")
         return False
     if not recipients:
         log.error("send_email failed: ไม่มีผู้รับ (ตั้ง email_to ใน settings.json หรือ EMAIL_TO)")
@@ -547,22 +570,28 @@ def send_email(subject: str, html_body: str, to: list[str] | None = None) -> boo
         msg["To"] = ", ".join(recipients)
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
+        # Gmail (ชุดเดิม): ctx=None ให้ smtplib ใช้ default ของมันเอง (behavior เดิมเป๊ะ ห้ามแตะ)
+        # MailPlus: ต้องคุมเอง — verify ปกติ เว้นแต่เปิด SMTP2_INSECURE (กล่อง Synology ใบรับรอง self-signed)
+        ctx = None
+        if cfg["provider"] == "mailplus":
+            ctx = ssl._create_unverified_context() if cfg["insecure"] else ssl.create_default_context()
+
         if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=30) as server:
+            with smtplib.SMTP_SSL(host, port, timeout=30, context=ctx) as server:
                 server.login(user, password)
                 server.send_message(msg, from_addr=sender, to_addrs=recipients)
         else:
             with smtplib.SMTP(host, port, timeout=30) as server:
                 server.ehlo()
-                server.starttls()
+                server.starttls(context=ctx)
                 server.ehlo()
                 server.login(user, password)
                 server.send_message(msg, from_addr=sender, to_addrs=recipients)
 
-        log.info(f"Email sent → {', '.join(recipients)}  subject: {subject}")
+        log.info(f"Email sent ({cfg['label']}) → {', '.join(recipients)}  subject: {subject}")
         return True
     except Exception as e:
-        log.error(f"send_email failed: {e}")
+        log.error(f"send_email failed ({cfg['label']}): {e}")
         return False
 
 # ─────────────────────────── Email Builders ───────────────────────────
@@ -626,19 +655,20 @@ def build_error_email(bank: dict, step: str, message: str, ts: str) -> tuple[str
 
 
 def build_test_email() -> tuple[str, str]:
-    """อีเมลทดสอบ — ใช้ verify ค่า SMTP ผ่านปุ่มบนหน้าเว็บ / CLI --test-email"""
+    """อีเมลทดสอบ — ใช้ verify ค่า SMTP ผ่านปุ่มบนหน้าเว็บ / CLI --test-email
+    แสดง provider ที่กำลังเลือกใช้งานจริง (Gmail หรือ MailPlus) ไม่ใช่แค่ SMTP_* เสมอ"""
+    cfg = _active_smtp_config()
     ts = datetime.now().isoformat(timespec="seconds")
-    host = os.environ.get("SMTP_HOST", "-")
-    port = os.environ.get("SMTP_PORT", "-")
-    user = os.environ.get("SMTP_USER", "-")
+    provider_name = "MailPlus (Synology)" if cfg["provider"] == "mailplus" else "Gmail"
     recipients = ", ".join(get_recipients()) or "-"
     subject = f"[TEST] ทดสอบระบบส่งอีเมล CheckRate {ts[:10]}"
     html = f"""
 <p>✅ <strong>ทดสอบส่งอีเมลสำเร็จ</strong> — ระบบ CheckRate เชื่อมต่อ SMTP ได้เรียบร้อย</p>
 <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px">
   <tr><td><strong>เวลา</strong></td><td>{ts}</td></tr>
-  <tr><td><strong>SMTP host</strong></td><td>{host}:{port}</td></tr>
-  <tr><td><strong>ผู้ส่ง</strong></td><td>{user}</td></tr>
+  <tr><td><strong>Provider</strong></td><td>{provider_name}</td></tr>
+  <tr><td><strong>SMTP host</strong></td><td>{cfg['host'] or '-'}:{cfg['port']}</td></tr>
+  <tr><td><strong>ผู้ส่ง</strong></td><td>{cfg['user'] or '-'}</td></tr>
   <tr><td><strong>ผู้รับ</strong></td><td>{recipients}</td></tr>
 </table>
 <p style="font-size:12px;color:#888">อีเมลนี้ส่งจากปุ่ม "ทดสอบส่งอีเมล" หรือคำสั่ง <code>--test-email</code></p>"""

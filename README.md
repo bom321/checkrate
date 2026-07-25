@@ -16,6 +16,8 @@
 - **Parser แบบ plugin** — โค้ดอ่านค่าของแต่ละธนาคารแยกเป็นไฟล์ (`app/monitor/banks/<code>.py`) เพิ่มธนาคารใหม่ที่มี PDF คนละรูปแบบได้โดยไม่แตะโค้ดส่วนกลาง
 - **ค้นหาประวัติย้อนหลัง** — `discover_year` สแกนหาไฟล์ประกาศเก่าทั้งปี (ธนาคารที่รองรับเท่านั้น) และ `--backfill` สร้าง CSV ใหม่จาก PDF ที่ดาวน์โหลดเก็บไว้แล้ว
 - **แจ้งเตือนอีเมลผ่าน SMTP + App Password** (ไม่พึ่ง Gmail API/OAuth) รองรับผู้รับหลายคน แก้ผ่านหน้าเว็บได้
+  รองรับ **สอง provider** (Gmail ชุดหลัก / MailPlus-Synology ชุดสำรอง) สลับได้จากหน้า `/config`
+  โดยไม่ต้องแก้ env หรือรีสตาร์ท (ดูตาราง env ด้านล่าง คีย์ `SMTP2_*`)
 - **Login ผู้ดูแลด้วย OTP ทางอีเมล** (`app/web/auth.py`) — ไม่มีฐานข้อมูล/รหัสผ่าน รายชื่อผู้มีสิทธิ์กำหนดผ่าน env
   `ADMIN_EMAILS` เท่านั้น (แก้จากเว็บไม่ได้ กันยกระดับสิทธิ์ผ่าน API) session cookie เซ็นด้วย secret ที่ persist ข้าม restart
 - **แก้ค่าที่ OCR/parser อ่านผิดหรืออ่านไม่ได้ (manual override)** — หน้า `/bank/{code}/manual` (admin เท่านั้น)
@@ -94,10 +96,12 @@ CheckRate/
 
 | ตัวแปร | ความหมาย |
 |---|---|
-| `SMTP_HOST` / `SMTP_PORT` | เซิร์ฟเวอร์ SMTP (Gmail: `smtp.gmail.com` / `465`) |
-| `SMTP_USER` / `SMTP_PASSWORD` | บัญชี + **App Password** สำหรับส่งอีเมล |
+| `SMTP_HOST` / `SMTP_PORT` | เซิร์ฟเวอร์ SMTP หลัก (Gmail: `smtp.gmail.com` / `465`) |
+| `SMTP_USER` / `SMTP_PASSWORD` | บัญชี + **App Password** สำหรับส่งอีเมล (ชุดหลัก) |
 | `EMAIL_FROM` | อีเมลผู้ส่ง (มักเป็นตัวเดียวกับ `SMTP_USER`) |
 | `EMAIL_TO` | ผู้รับเริ่มต้น (คั่นหลายคนด้วย `,`) — แก้ผ่านหน้าเว็บได้ (เก็บใน `settings.json`) |
+| `SMTP2_HOST` / `SMTP2_PORT` / `SMTP2_USER` / `SMTP2_PASSWORD` / `SMTP2_FROM` | ชุด SMTP สำรอง (เช่น Synology MailPlus) — ชื่อฟิลด์เหมือน `SMTP_*` ทุกตัว |
+| `SMTP2_INSECURE` | ตั้ง `1` เพื่อข้ามการตรวจสอบใบรับรอง TLS ของชุดสำรอง — ใช้เฉพาะเมื่อเจอ `SSLCertVerificationError` (ใบรับรอง self-signed/hostname ไม่ตรง เช่น ต่อกล่อง Synology ผ่าน LAN IP) ลอง `0` ก่อนเสมอ |
 | `DATA_DIR` | ตำแหน่งเก็บข้อมูล (local: `./data`, Docker: `/data`) |
 | `WEB_HOST` / `WEB_PORT` | host/port ของเว็บ (ค่าเริ่มต้น `0.0.0.0` / `8080`) |
 | `ADMIN_EMAILS` | อีเมลที่มีสิทธิ์เข้า `/config`, `/logs` และกดปุ่มรันตรวจสอบ (คั่นหลายคนด้วย `,`) — ไม่มีทางแก้จากเว็บ |

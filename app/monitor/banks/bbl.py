@@ -559,7 +559,7 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
 
     if remaining:
         log.error(f"extract_rates: อ่านค่าไม่ได้แม้ลองครบ {len(OCR_VARIANTS)} OCR variant: "
-                  f"{', '.join(sorted(remaining))} — ปล่อยว่างไว้ (ไม่เดาค่า)")
+                  f"{', '.join(sorted(remaining))} — ปล่อยว่างไว้")
 
     if not result:
         log.error("extract_rates: อ่านค่าไม่ได้เลยสักตัว (ทุก target ล้มเหลว)")

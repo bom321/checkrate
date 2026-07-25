@@ -113,6 +113,9 @@
     container.innerHTML = state.banks.map((b, i) => bankCardHtml(b, i)).join('');
     document.getElementById('email-to').value =
       Array.isArray(state.settings.email_to) ? state.settings.email_to.join(', ') : (state.settings.email_to || '');
+    const provider = state.settings.email_provider || 'gmail';
+    const providerInput = document.querySelector(`input[name="email-provider"][value="${provider}"]`);
+    if (providerInput) providerInput.checked = true;
     const on = state.banks.filter(b => b.enabled).length;
     countEl.textContent = `เปิดใช้งาน ${on} · ปิด ${state.banks.length - on}`;
     wireEvents();
@@ -228,12 +231,14 @@
   async function saveSettings() {
     const raw = document.getElementById('email-to').value;
     const emails = raw.split(',').map(s => s.trim()).filter(Boolean);
+    const providerInput = document.querySelector('input[name="email-provider"]:checked');
+    const email_provider = providerInput ? providerInput.value : 'gmail';
     const res = await fetch('/api/settings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email_to: emails }),
+      body: JSON.stringify({ email_to: emails, email_provider }),
     });
     const data = await res.json();
-    if (data.ok) notice('ok', '✓ บันทึกผู้รับอีเมลเรียบร้อย (' + (data.recipients || []).join(', ') + ')');
+    if (data.ok) notice('ok', '✓ บันทึกการตั้งค่าอีเมลเรียบร้อย (' + (data.recipients || []).join(', ') + ')');
     else notice('err', 'บันทึกไม่สำเร็จ: ' + (data.error || ''));
   }
 

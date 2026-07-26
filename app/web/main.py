@@ -233,6 +233,9 @@ def _bank_month_summary(bank: dict, month: str) -> dict:
 
     changed = [p for p in products_all if p["times"]]   # 2a/5a: สถิติทั้งหมดนับจากรายการที่เปลี่ยนจริง
     last_row = in_month[-1] if in_month else baseline   # เดือนที่ไม่มีประกาศ → อ้างฉบับสุดท้ายก่อนหน้า
+    # "เปลี่ยนกี่ครั้ง" ของธนาคาร = นับตามวันที่ประกาศ ไม่ใช่ผลรวม times รายผลิตภัณฑ์ —
+    # ประกาศฉบับเดียวที่ทำให้หลายผลิตภัณฑ์ขยับพร้อมกัน คือการเปลี่ยนแปลง 1 ครั้ง
+    change_dates = {e["date"] for p in changed for e in p["timeline"]}
     return base | {
         "announce_count": len(in_month),
         # วันที่ของประกาศที่คอลัมน์ "ครั้งก่อน"/"ปัจจุบัน" อ้างถึง — หัวตารางเอาไปแสดงใต้ชื่อคอลัมน์
@@ -244,7 +247,7 @@ def _bank_month_summary(bank: dict, month: str) -> dict:
         "products": changed,          # overview — เฉพาะที่เปลี่ยน
         "products_all": products_all,  # bank detail — ทุกระยะ รวมที่คงเดิม
         "changed_items": len(changed),
-        "total_times": sum(p["times"] for p in changed),
+        "total_times": len(change_dates),
         "net_sum": round(sum(p["net"] for p in changed if p["net"] is not None), 2),
         "up": sum(1 for p in changed if p["net"] and p["net"] > 0),
         "down": sum(1 for p in changed if p["net"] and p["net"] < 0),
@@ -378,6 +381,16 @@ def bank_manual_page(request: Request, code: str, month: str | None = None):
         for t in targets:
             key = t["key"]
             raw = (r.get(key) or "").strip()
+            # ค่าที่กรอกเองชนะค่าใน CSV เสมอ — CSV ตามหลังอยู่หนึ่งจังหวะ (backfill เพิ่งถูก trigger
+            # ตอนบันทึก ยังไม่เขียนไฟล์เสร็จ หรือไม่ได้เริ่มเลยเพราะ _start_job มีสล็อตเดียว)
+            # ถ้าอ่านจาก CSV อย่างเดียว หน้าจอหลังบันทึกจะเด้งกลับไปโชว์ค่าเดิมที่เพิ่งแก้ทิ้ง
+            ov = overrides.get(key)
+            if ov is not None:
+                val = ov.get("value") if isinstance(ov, dict) else ov
+                try:
+                    raw = f"{float(val):.2f}"     # ให้ตรงรูปแบบเดียวกับที่ append_to_csv เขียน
+                except (TypeError, ValueError):
+                    pass
             cells[key] = {"value": raw, "empty": not raw, "manual": key in overrides}
         rows.append({"date": date, "cells": cells,
                      "pdf_name": f"{code.lower()}_deposit_{date}.pdf"})
@@ -646,6 +659,16 @@ def api_get_config():
     return {"banks": banks, "settings": da.load_settings(), "logos": logos}
 
 
+_VALID_TARGET_MODES = {"cell", "max_tier", "top_tier", "max_all"}  # ดู CLAUDE.md หัวข้อ "อัตราสูงสุด"
+
+# parser ที่ยังไม่รองรับโหมด max_tier/top_tier/max_all — ว่างอยู่ตอนนี้ (SCB/KTB/BAY/KBANK/BBL รองรับ
+# ครบแล้ว) ธนาคารใหม่ที่ parser ยังไม่รองรับให้ใส่ parser id ที่นี่ (BBL เคยอยู่ในเซ็ตนี้เพราะเป็น OCR
+# เสี่ยงอ่านค่าสูงสุดผิด — แก้แล้วด้วยกลไกโหวตข้าม OCR variant ดู bbl.py/CLAUDE.md)
+# ต้องตรงกับ MAX_MODE_UNSUPPORTED_PARSERS ใน config.js เสมอ — ที่นี่กันกรณียิง POST /api/config ตรง ๆ
+# ข้ามหน้าเว็บ (dropdown โหมดฝั่ง JS แค่ disable ไว้ ไม่ใช่การบังคับจริง)
+_MAX_MODE_UNSUPPORTED_PARSERS = set()
+
+
 def _validate_banks(banks) -> str | None:
     if not isinstance(banks, list):
         return "รูปแบบข้อมูลไม่ถูกต้อง (ต้องเป็น list ของธนาคาร)"
@@ -658,9 +681,16 @@ def _validate_banks(banks) -> str | None:
             k = t.get("key")
             if not k:
                 return f"[{code}] มี rate target ที่ไม่มี key"
+            if k == "tiers_used":
+                return f"[{code}] key 'tiers_used' เป็นคีย์สงวน (ใช้ภายในผล extract_rates) ห้ามใช้"
             if k in keys:
                 return f"[{code}] key ซ้ำ: {k}"
             keys.append(k)
+            mode = t.get("mode", "cell")
+            if mode not in _VALID_TARGET_MODES:
+                return f"[{code}] target '{k}': mode '{mode}' ไม่รู้จัก"
+            if mode != "cell" and b.get("parser") in _MAX_MODE_UNSUPPORTED_PARSERS:
+                return f"[{code}] target '{k}': parser '{b.get('parser')}' ยังไม่รองรับโหมดอัตราสูงสุด"
             # ต้องมี row_keyword หรือ tenor_months อย่างน้อยหนึ่งอย่าง ไม่งั้นจะหาแถวไม่เจอ
             if not t.get("row_keyword") and not t.get("tenor_months"):
                 return (f"[{code}] target '{k}': ต้องระบุ 'Row (ผลิตภัณฑ์/ระยะเวลา)' "

@@ -34,8 +34,11 @@ def available_parsers() -> list[str]:
     return sorted(_REGISTRY.keys())
 
 
-# _tablekit ใช้ร่วมกันหลาย parser — แก้ไฟล์นั้นก็ถือว่า parser เปลี่ยนตามด้วย
-_SHARED_SOURCES = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tablekit.py")]
+# _tablekit.py / _maxscan.py ใช้ร่วมกันหลาย parser — แก้ไฟล์ใดไฟล์หนึ่งก็ถือว่า parser ที่ใช้เปลี่ยนตามด้วย
+# (BBL เริ่มใช้ _maxscan.py ตั้งแต่รองรับโหมด max_tier/top_tier/max_all — ถ้าลืมใส่ที่นี่ แก้ _maxscan.py
+# จะไม่ invalidate parse cache ของ BBL ทั้งที่ควร)
+_SHARED_SOURCES = [os.path.join(os.path.dirname(os.path.abspath(__file__)), f)
+                    for f in ("_tablekit.py", "_maxscan.py")]
 
 
 def parser_signature(bank: dict) -> str:
@@ -95,4 +98,32 @@ def discover_year(bank: dict, year: int | None = None) -> list[str] | None:
     mod = _REGISTRY.get(bank.get("parser", ""))
     if mod is not None and hasattr(mod, "discover_year"):
         return mod.discover_year(bank, year)
+    return None
+
+
+def supports_max_modes(bank: dict) -> bool:
+    """True ถ้า parser ของธนาคารนี้รองรับ rate_target โหมด max_tier/top_tier/max_all ("อัตราสูงสุด" ①②③)
+    ใช้ซ่อน/ปิดตัวติ๊กเลือกในหน้า /config — เช็คด้วย hasattr(mod, "debug_tiers") เพราะฟังก์ชันนี้มีเฉพาะ
+    parser ที่แยก collect/pick ของ tier ออกจากกันแล้วจริง (เดิมเช็คด้วย DEPOSITOR_COLUMNS ซึ่งคืน True
+    ให้ BBL มาตั้งแต่ก่อนรองรับโหมด max จริง เพราะ BBL มี DEPOSITOR_COLUMNS อยู่แล้วสำหรับโหมด cell —
+    ไม่ได้แปลว่ารองรับโหมด max เป็นสัญญาณที่ผิด) ฟังก์ชันนี้ยังไม่ถูกเรียกใช้จากที่ไหนในเว็บ (เว็บ hardcode
+    รายชื่อ parser ที่ไม่รองรับไว้เองใน config.js/main.py แทน — ดู CLAUDE.md)"""
+    mod = _REGISTRY.get(bank.get("parser", ""))
+    return mod is not None and hasattr(mod, "debug_tiers")
+
+
+def depositor_options(bank: dict) -> dict[int, list[str]]:
+    """คืนคอลัมน์ผู้ฝากมาตรฐานทั้งหมดที่ parser ของธนาคารนี้รองรับ ({คอลัมน์: [ชื่อ, alias, ...]})
+    ใช้สร้างตัวเลือกใน UI และให้โหมด max_all (③) ไล่ทุกคอลัมน์ — คืน {} ถ้า parser ไม่รองรับ"""
+    mod = _REGISTRY.get(bank.get("parser", ""))
+    return dict(getattr(mod, "DEPOSITOR_COLUMNS", {}))
+
+
+def debug_tiers(bank: dict, pdf_bytes: bytes) -> list[dict] | None:
+    """เก็บ tier ที่ parser อ่านได้ต่อ target พร้อมผลลัพธ์ทั้ง 4 โหมด (cell เดิม, max_tier①, top_tier②,
+    max_all③) — ใช้กับ CLI `--show-tiers CODE` เป็นเครื่องมือตรวจตาก่อนปล่อยค่าโหมด max ลง CSV จริง
+    คืน None ถ้า parser ธนาคารนี้ยังไม่รองรับ (ยังไม่ได้แยก collect/pick — ดู CLAUDE.md milestone M1-M4)"""
+    mod = _REGISTRY.get(bank.get("parser", ""))
+    if mod is not None and hasattr(mod, "debug_tiers"):
+        return mod.debug_tiers(pdf_bytes, bank)
     return None

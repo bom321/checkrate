@@ -31,6 +31,7 @@ import pdfplumber
 from .. import common
 from ..common import log
 from ._tablekit import thai_skeleton, kw_in_line, kw_in_joined, amount_to_million
+from . import _maxscan
 
 PARSER_IDS = ["kbank"]
 
@@ -75,6 +76,9 @@ _DEPOSITOR_ALIASES: dict[int, list[str]] = {
     5: ["สถาบันการเงิน", "financial institution"],
     6: ["กองทุน", "fund"],
 }
+# alias ให้ banks/__init__.py (depositor_options/supports_max_modes) มองเห็นเหมือน parser อื่น
+# — KBANK รองรับโหมด max_* (①②③) แค่ 4 คอลัมน์นี้ (ดูเหตุผลกำกวมของ anchor นิติบุคคลด้านบน)
+DEPOSITOR_COLUMNS: dict[int, list[str]] = _DEPOSITOR_ALIASES
 _COLUMN_X_TOLERANCE = 15.0  # px — คอลัมน์ห่างกันจริง ~35-40px, ตำแหน่งเบี้ยวจริง ≤4px ระหว่างหน้า/ฉบับ
 
 
@@ -382,6 +386,39 @@ def _pick_tier(tiers: list[tuple[str, float, float | None, list[dict]]],
     return None, "ไม่พบ tier ที่เหมาะสม"
 
 
+# ─────────────────────────── โหมด max_tier/top_tier/max_all (①②③ "อัตราสูงสุด") ───────────────────────────
+_MAX_TIER_DESC = {
+    "less_than": lambda lo, hi: f"น้อยกว่า {hi:g} ล้านบาท",
+    "up_to": lambda lo, hi: f"ไม่เกิน {hi:g} ล้านบาท",
+    "between": lambda lo, hi: f"ตั้งแต่ {lo:g} ถึง {hi:g} ล้านบาท",
+    "above": lambda lo, hi: f"มากกว่า {lo:g} ล้านบาท",
+    "at_least": lambda lo, hi: f"ตั้งแต่ {lo:g} ล้านบาทขึ้นไป",
+    "single": lambda lo, hi: "บรรทัดเดียว (ไม่มี tier วงเงิน)",
+}
+
+
+def _to_max_tiers(tiers: list[tuple[str, float, float | None, list[dict]]]) -> list[tuple]:
+    """แปลง tiers ที่ _find_tenor_tiers() เก็บมาแล้ว (t_type, lo, hi, words) → รูปแบบมาตรฐาน
+    (kind, lower_m, upper_m, desc, raw) ของ _maxscan.select() — kind ของ KBANK (less_than/up_to/
+    between/above/at_least/single) ตรงกับที่ _maxscan.tier_rank() รู้จักอยู่แล้ว ไม่ต้องแปลงชื่อ"""
+    out = []
+    for t_type, lo, hi, words in tiers:
+        desc = _MAX_TIER_DESC.get(t_type, lambda lo, hi: t_type)(lo, hi)
+        out.append((t_type, lo if lo is not None else 0.0, hi, desc, words))
+    return out
+
+
+def _make_value_of(scoped_words: list[dict]):
+    """คืน callback value_of(tier, col) ของ _maxscan.select() — หาตำแหน่งคอลัมน์ col จาก
+    scoped_words ของหัวข้อนี้ (scope เดียวกับที่โหมด cell ใช้) แล้วดึงค่าที่ตำแหน่งนั้นจาก tier[4] (words)"""
+    def value_of(tier: tuple, col: int) -> str | None:
+        anchor_x = _find_column_anchor_x(scoped_words, col)
+        if anchor_x is None:
+            return None
+        return _value_at_column(tier[4], anchor_x)
+    return value_of
+
+
 def _value_at_column(value_words: list[dict], anchor_x: float) -> str | None:
     """หา token ตัวเลขในกลุ่มคำที่ x0 ใกล้ anchor_x ที่สุด (ภายใน tolerance) — คืน None ถ้าไม่มีค่า
     ที่ตำแหน่งนี้ (คอลัมน์นั้นไม่มีอัตราให้บริการสำหรับ tier/tenor นี้ ซึ่งเกิดขึ้นได้ปกติ)"""
@@ -522,12 +559,9 @@ def _find_tenor_tiers(flat_rows: list[tuple[int, list[dict]]], row_kw: str):
     return None, None, None
 
 
-def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
-    """อ่านค่าอัตราดอกเบี้ยตาม rate_targets — เวอร์ชันนี้รองรับเงินฝากประจำมาตรฐาน
-    (เงินฝากประจำ {N} เดือน) คอลัมน์บุคคลธรรมดา/สถาบันการเงิน/กองทุน/ราชการ; target ที่ตั้งค่าผิด/หาไม่เจอ
-    จะถูกข้าม ไม่ล้มทั้งธนาคาร"""
-    rate_targets = bank["rate_targets"]
-
+def _extract_words(pdf_bytes: bytes) -> tuple[list[list[dict]], list[tuple[int, list[dict]]]] | None:
+    """ถอดคำ+พิกัดทุกหน้า จัดกลุ่มเป็นแถว — ใช้ร่วมกันทั้ง extract_rates() และ debug_tiers()
+    คืน (pages_words, flat_rows) หรือ None ถ้าอ่าน PDF ไม่ได้เลย"""
     pages_words: list[list[dict]] = []
     flat_rows: list[tuple[int, list[dict]]] = []
     try:
@@ -538,8 +572,22 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
                 for row in _group_rows(words):
                     flat_rows.append((pidx, row))
     except Exception as e:
-        log.error(f"kbank.extract_rates: อ่าน PDF ล้มเหลว: {e}")
+        log.error(f"kbank: อ่าน PDF ล้มเหลว: {e}")
         return None
+    return pages_words, flat_rows
+
+
+def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
+    """อ่านค่าอัตราดอกเบี้ยตาม rate_targets — เวอร์ชันนี้รองรับเงินฝากประจำมาตรฐาน
+    (เงินฝากประจำ {N} เดือน) คอลัมน์บุคคลธรรมดา/สถาบันการเงิน/กองทุน/ราชการ; target ที่ตั้งค่าผิด/หาไม่เจอ
+    จะถูกข้าม ไม่ล้มทั้งธนาคาร target mode='max_tier'/'top_tier'/'max_all' ("อัตราสูงสุด" ①②③ —
+    ดู CLAUDE.md) รองรับแค่ 4 คอลัมน์เดียวกับโหมด cell (anchor นิติบุคคลกำกวม — ดู docstring ด้านบน)"""
+    rate_targets = bank["rate_targets"]
+
+    parsed = _extract_words(pdf_bytes)
+    if parsed is None:
+        return None
+    pages_words, flat_rows = parsed
 
     result: dict = {}
     tiers_used: dict = {}
@@ -547,17 +595,11 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
 
     for target in rate_targets:
         key = target["key"]
+        mode = target.get("mode", "cell")
         tenor = target.get("tenor_months")
         row_kw = target.get("row_keyword") or (DEFAULT_ROW_TEMPLATE.format(tenor=tenor) if tenor else None)
         if not row_kw:
             log.error(f"extract_rates [{key}]: ไม่มี row_keyword และไม่มี tenor_months — ข้าม target นี้")
-            failed.append(key); continue
-
-        depositor_value = target.get("depositor", "บุคคลธรรมดา")
-        col = resolve_depositor(depositor_value)
-        if col is None:
-            log.error(f"extract_rates [{key}]: depositor '{depositor_value}' ไม่รู้จัก/ยังไม่รองรับ "
-                      f"(รองรับ: บุคคลธรรมดา, สถาบันการเงิน, กองทุน, ราชการ) — ข้าม target นี้")
             failed.append(key); continue
 
         heading_page, heading_top, tiers = _find_tenor_tiers(flat_rows, row_kw)
@@ -568,31 +610,60 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
         # scope การหาคอลัมน์ให้แคบแค่ "เหนือหัวข้อ tenor นี้ บนหน้าเดียวกัน" — กัน anchor keyword
         # (เช่น 'กองทุน'/'ราชการ') ชนกับที่ปรากฏซ้ำในเนื้อหาส่วนอื่นของเอกสาร
         scoped_words = [w for w in pages_words[heading_page] if w["top"] < heading_top]
-        anchor_x = _find_column_anchor_x(scoped_words, col)
-        if anchor_x is None:
-            log.error(f"extract_rates [{key}]: หาตำแหน่งคอลัมน์ไม่ได้ (header เพี้ยน/ไม่พบใกล้ '{row_kw}') "
-                      f"— ข้าม target นี้")
-            failed.append(key); continue
 
-        amount_m = target.get("amount_m")
-        if amount_m is None:
-            value_words, desc = tiers[0][3], "ไม่ระบุวงเงิน (ใช้ tier แรกที่พบ)"
+        if mode == "cell":
+            depositor_value = target.get("depositor", "บุคคลธรรมดา")
+            col = resolve_depositor(depositor_value)
+            if col is None:
+                log.error(f"extract_rates [{key}]: depositor '{depositor_value}' ไม่รู้จัก/ยังไม่รองรับ "
+                          f"(รองรับ: บุคคลธรรมดา, สถาบันการเงิน, กองทุน, ราชการ) — ข้าม target นี้")
+                failed.append(key); continue
+
+            anchor_x = _find_column_anchor_x(scoped_words, col)
+            if anchor_x is None:
+                log.error(f"extract_rates [{key}]: หาตำแหน่งคอลัมน์ไม่ได้ (header เพี้ยน/ไม่พบใกล้ '{row_kw}') "
+                          f"— ข้าม target นี้")
+                failed.append(key); continue
+
+            amount_m = target.get("amount_m")
+            if amount_m is None:
+                value_words, desc = tiers[0][3], "ไม่ระบุวงเงิน (ใช้ tier แรกที่พบ)"
+            else:
+                value_words, desc = _pick_tier(tiers, amount_m)
+
+            if value_words is None:
+                log.error(f"extract_rates [{key}]: {desc} — ข้าม target นี้")
+                failed.append(key); continue
+
+            raw_v = _value_at_column(value_words, anchor_x)
+            if raw_v is None:
+                log.error(f"extract_rates [{key}]: ไม่มีอัตราสำหรับคอลัมน์นี้ในบรรทัด (อาจไม่มีให้บริการลูกค้าประเภทนี้) "
+                          f"— ข้าม target นี้")
+                failed.append(key); continue
+            try:
+                rate = float(raw_v.replace(",", ""))
+            except ValueError:
+                log.error(f"extract_rates [{key}]: ค่าไม่ใช่ตัวเลข: {raw_v!r} — ข้าม target นี้")
+                failed.append(key); continue
+
+        elif mode in _maxscan.MODES:
+            col = None
+            if mode != "max_all":
+                depositor_value = target.get("depositor", "บุคคลธรรมดา")
+                col = resolve_depositor(depositor_value)
+                if col is None:
+                    log.error(f"extract_rates [{key}]: depositor '{depositor_value}' ไม่รู้จัก/ยังไม่รองรับ "
+                              f"(รองรับ: บุคคลธรรมดา, สถาบันการเงิน, กองทุน, ราชการ) — ข้าม target นี้")
+                    failed.append(key); continue
+
+            max_tiers = _to_max_tiers(tiers)
+            rate, desc = _maxscan.select(mode, max_tiers, col, DEPOSITOR_COLUMNS, _make_value_of(scoped_words))
+            if rate is None:
+                log.error(f"extract_rates [{key}]: {desc} — ข้าม target นี้")
+                failed.append(key); continue
+
         else:
-            value_words, desc = _pick_tier(tiers, amount_m)
-
-        if value_words is None:
-            log.error(f"extract_rates [{key}]: {desc} — ข้าม target นี้")
-            failed.append(key); continue
-
-        raw_v = _value_at_column(value_words, anchor_x)
-        if raw_v is None:
-            log.error(f"extract_rates [{key}]: ไม่มีอัตราสำหรับคอลัมน์นี้ในบรรทัด (อาจไม่มีให้บริการลูกค้าประเภทนี้) "
-                      f"— ข้าม target นี้")
-            failed.append(key); continue
-        try:
-            rate = float(raw_v.replace(",", ""))
-        except ValueError:
-            log.error(f"extract_rates [{key}]: ค่าไม่ใช่ตัวเลข: {raw_v!r} — ข้าม target นี้")
+            log.error(f"extract_rates [{key}]: ไม่รู้จัก mode '{mode}' — ข้าม target นี้")
             failed.append(key); continue
 
         result[key] = rate
@@ -608,3 +679,71 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
 
     result["tiers_used"] = tiers_used
     return result
+
+
+def debug_tiers(pdf_bytes: bytes, bank: dict) -> list[dict] | None:
+    """ใช้กับ CLI `--show-tiers KBANK` — คืนต่อ target: tier ที่เก็บได้ + ผลลัพธ์ทั้ง 4 โหมด
+    (cell เดิม, max_tier①, top_tier②, max_all③) ไม่สนใจว่า target นั้นตั้ง mode อะไรไว้จริง
+    โหมด max รองรับแค่ 4 คอลัมน์เดียวกับโหมด cell (ดู DEPOSITOR_COLUMNS/docstring ด้านบน)"""
+    parsed = _extract_words(pdf_bytes)
+    if parsed is None:
+        return None
+    pages_words, flat_rows = parsed
+
+    report: list[dict] = []
+    for target in bank["rate_targets"]:
+        key = target["key"]
+        tenor = target.get("tenor_months")
+        row_kw = target.get("row_keyword") or (DEFAULT_ROW_TEMPLATE.format(tenor=tenor) if tenor else None)
+        depositor_value = target.get("depositor", "บุคคลธรรมดา")
+        col = resolve_depositor(depositor_value)
+
+        item: dict = {"key": key, "label": target.get("label", key), "depositor": depositor_value}
+        if not row_kw or col is None:
+            item["row_found"] = "ตั้งค่า row_keyword/tenor_months หรือ depositor ไม่ถูกต้อง/ไม่รองรับ"
+            item["results"] = {}
+            item["tiers"] = []
+            report.append(item)
+            continue
+
+        heading_page, heading_top, tiers = _find_tenor_tiers(flat_rows, row_kw)
+        if not tiers:
+            item["row_found"] = None
+            item["results"] = {}
+            item["tiers"] = []
+            report.append(item)
+            continue
+        item["row_found"] = row_kw
+
+        scoped_words = [w for w in pages_words[heading_page] if w["top"] < heading_top]
+        value_of = _make_value_of(scoped_words)
+        max_tiers = _to_max_tiers(tiers)
+
+        results: dict = {}
+        anchor_x = _find_column_anchor_x(scoped_words, col)
+        if anchor_x is not None:
+            amount_m = target.get("amount_m")
+            cell_words, cell_desc = (tiers[0][3], "ไม่ระบุวงเงิน (ใช้ tier แรกที่พบ)") if amount_m is None \
+                else _pick_tier(tiers, amount_m)
+            if cell_words is not None:
+                raw_v = _value_at_column(cell_words, anchor_x)
+                if raw_v is not None:
+                    try:
+                        results["cell"] = (float(raw_v.replace(",", "")), cell_desc)
+                    except ValueError:
+                        pass
+        for mode in _maxscan.MODES:
+            m_col = None if mode == "max_all" else col
+            rate, desc = _maxscan.select(mode, max_tiers, m_col, DEPOSITOR_COLUMNS, value_of)
+            if rate is not None:
+                results[mode] = (rate, desc)
+        item["results"] = results
+
+        item["tiers"] = [
+            {"desc": t[3],
+             "col_values": {DEPOSITOR_COLUMNS[c][0]: (value_of(t, c) or "-") for c in DEPOSITOR_COLUMNS}}
+            for t in max_tiers
+        ]
+        report.append(item)
+
+    return report

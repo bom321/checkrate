@@ -50,6 +50,34 @@
     });
   }
 
+  // รอ backfill ที่ server สั่งให้ตอนบันทึกจบก่อนค่อยรีโหลด — เดิมรีโหลดหลัง 1.5 วิ แบบตายตัว
+  // ซึ่งมักเร็วกว่างานจริง (subprocess เพิ่งสตาร์ท) หน้าจึงถูกวาดใหม่จาก CSV ก้อนเดิม = เห็นค่าเก่า
+  // (ยอมแพ้หลัง MAX_WAIT แล้วรีโหลดอยู่ดี — ค่าที่กรอกเองแสดงได้จาก manual.json ตั้งแต่ยังไม่ rebuild)
+  const POLL_MS = 1500;
+  const MAX_WAIT_MS = 120000;
+
+  async function jobStatus() {
+    try {
+      return await (await fetch('/api/run/status')).json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // prevStarted = เวลาเริ่มงานล่าสุด "ก่อน" กดบันทึก — ใช้แยกว่างานที่เห็นเป็นงานของเราหรืองานเก่า
+  // (จำเป็นเพราะ backfill ที่ cache hit ทุกไฟล์อาจจบก่อน poll รอบแรกด้วยซ้ำ)
+  async function reloadWhenJobDone(prevStarted) {
+    const deadline = Date.now() + MAX_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      const job = await jobStatus();
+      if (!job) break;                                   // เช็คสถานะไม่ได้ → รีโหลดไปเลย
+      if (job.running) continue;
+      if (job.started !== prevStarted) break;            // งานของเราจบแล้ว → CSV ใหม่พร้อม
+    }
+    location.reload();
+  }
+
   saveBtn.addEventListener('click', async () => {
     const { payload, changedCount } = collectChanges();
     if (!changedCount) {
@@ -59,6 +87,8 @@
 
     saveBtn.disabled = true;
     setMsg('ok', '⏳ กำลังบันทึก...');
+    const before = await jobStatus();
+    const prevStarted = before ? before.started : null;
     try {
       const res = await fetch(`/api/manual/${code}`, {
         method: 'POST',
@@ -72,8 +102,16 @@
         return;
       }
       dirty = false;
+      if (body.backfill_started === false) {
+        // สล็อตงานเดียว: มีงานอื่นค้างอยู่ → CSV ยังไม่อัปเดตจนกว่าจะ backfill รอบถัดไป
+        // (ค่าที่กรอกเองบันทึกลง manual.json แล้ว และหน้านี้แสดงให้เห็นตั้งแต่ยังไม่ rebuild)
+        setMsg('ok', `บันทึกแล้ว ${body.changed} ช่อง — แต่มีงานอื่นกำลังรันอยู่ ` +
+                     'ระบบยังไม่ได้สร้าง CSV ใหม่ ให้กด "เติมข้อมูลย้อนหลัง" ในหน้าธนาคารอีกครั้งเมื่องานนั้นเสร็จ');
+        setTimeout(() => location.reload(), 2500);
+        return;
+      }
       setMsg('ok', `บันทึกแล้ว ${body.changed} ช่อง — กำลัง rebuild ข้อมูล (ใช้ cache จึงเร็วมาก)...`);
-      setTimeout(() => location.reload(), 1500);
+      reloadWhenJobDone(prevStarted);
     } catch (e) {
       setMsg('err', 'เชื่อมต่อไม่ได้');
       saveBtn.disabled = false;

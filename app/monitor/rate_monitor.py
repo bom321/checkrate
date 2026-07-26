@@ -13,6 +13,9 @@ Flow ร่วม (ไม่มี logic เฉพาะธนาคาร — �
                                                        เช่น KBANK) ดาวน์โหลดไฟล์ที่ยังไม่มี แล้ว backfill ให้
                                                        ใช้เวลานาน (~นาที) เหมาะกดด้วยมือเป็นครั้งคราว ไม่ใช่รันทุกวัน
   python -m app.monitor.rate_monitor --test-email     ส่งอีเมลทดสอบเพื่อ verify SMTP
+  python -m app.monitor.rate_monitor --show-tiers SCB อ่าน PDF ล่าสุดของธนาคารนั้นแล้วพิมพ์ tier
+                                                       วงเงินที่เก็บได้ต่อ target + ค่าทั้ง 4 โหมด
+                                                       (cell เดิม, ①②③) — เครื่องมือตรวจตาก่อนติ๊กใช้จริง
 
 ค่าทั้งหมด (path/SMTP) อ่านจาก environment variable — ดู common.py
 """
@@ -396,6 +399,44 @@ def _parse_year_arg(argv: list[str]) -> int | None:
     return year
 
 
+def _parse_show_tiers_arg(argv: list[str]) -> str | None:
+    for i, a in enumerate(argv):
+        if a == "--show-tiers" and i + 1 < len(argv):
+            return argv[i + 1].strip().upper()
+    return None
+
+
+def _print_tiers_report(code: str, report: list[dict]) -> None:
+    """พิมพ์ผล banks.debug_tiers() ให้อ่านง่าย — ใช้ตรวจตาเทียบกับ PDF ก่อนติ๊กใช้โหมด max จริง"""
+    MODE_LABELS = (
+        ("cell", "ค่าเดิม (amount_m)"),
+        ("max_tier", "① สูงสุดทุก tier"),
+        ("top_tier", "② tier วงเงินสูงสุด"),
+        ("max_all", "③ สูงสุดทุกผู้ฝาก"),
+    )
+    print(f"\n=== {code} — tier ที่เก็บได้ต่อ target ({len(report)} target) ===\n")
+    for item in report:
+        print(f"[{item['key']}] {item.get('label', item['key'])}  (ผู้ฝาก: {item.get('depositor', '-')})")
+        row_found = item.get("row_found")
+        if row_found:
+            print(f"    แถว: {row_found}")
+        results = item.get("results") or {}
+        for mode_key, mode_label in MODE_LABELS:
+            val = results.get(mode_key)
+            if not val or val[0] is None:
+                print(f"    {mode_label}: -")
+            else:
+                rate, desc = val
+                print(f"    {mode_label}: {rate:.2f}%  ← {desc}")
+        tiers = item.get("tiers") or []
+        if tiers:
+            print(f"    tier ที่เก็บได้ ({len(tiers)}):")
+            for t in tiers:
+                cols = "  ".join(f"{k}={v}" for k, v in (t.get("col_values") or {}).items())
+                print(f"      - {t.get('desc', '')}  [{cols}]")
+        print()
+
+
 def backfill_all(banks_list: list[dict], year: int | None = None):
     """backfill หลายธนาคารพร้อมกัน — แต่ละธนาคารเขียน CSV/cache คนละไฟล์ จึงไม่ชนกัน
     (ความช้าอยู่ที่การ parse ไม่ใช่ I/O — BBL ต้อง OCR, SCB/KBANK/KTB ต้องถอดข้อความ PDF)"""
@@ -420,6 +461,31 @@ if __name__ == "__main__":
         only = _parse_only_arg(argv)
         year = _parse_year_arg(argv)
         backfill_all(_filter_only(load_config(enabled_only=True), only), year)
+    elif "--show-tiers" in argv:
+        code = _parse_show_tiers_arg(argv)
+        if not code:
+            log.error("--show-tiers ต้องระบุรหัสธนาคาร เช่น --show-tiers SCB")
+            sys.exit(1)
+        bank = next((b for b in load_config(enabled_only=False) if b["code"].upper() == code), None)
+        if bank is None:
+            log.error(f"ไม่พบธนาคารรหัส '{code}' ใน banks_config.json")
+            sys.exit(1)
+        pdf_dir, _ = get_bank_paths(bank["code"])
+        prefix = f"{bank['code'].lower()}_deposit_"
+        pdf_files = sorted(f for f in os.listdir(pdf_dir) if f.startswith(prefix) and f.endswith(".pdf")) \
+            if os.path.isdir(pdf_dir) else []
+        if not pdf_files:
+            log.error(f"[{code}] ไม่พบ PDF ใน {pdf_dir}")
+            sys.exit(1)
+        latest_fname = pdf_files[-1]  # ชื่อไฟล์มีวันที่ ISO ต่อท้าย เรียงแล้ว = ล่าสุดอยู่ท้ายสุด
+        with open(os.path.join(pdf_dir, latest_fname), "rb") as f:
+            pdf_bytes = f.read()
+        log.info(f"[{code}] --show-tiers: อ่าน {latest_fname}")
+        report = banks.debug_tiers(bank, pdf_bytes)
+        if report is None:
+            print(f"[{code}] parser นี้ยังไม่รองรับ --show-tiers (ยังไม่ได้แยก collect/pick)")
+        else:
+            _print_tiers_report(code, report)
     elif "--discover-year" in argv:
         only = _parse_only_arg(argv)
         year = _parse_year_arg(argv)

@@ -21,6 +21,16 @@ parser id: "bbl"
     เงินฝากประจำตอนนี้ไม่แบ่ง) — parser นี้จึงรองรับ tier กับ **ทุกแถวเสมอ**: ถ้าแถวมีค่าอยู่บนบรรทัด
     เดียวกันก็ใช้เลย ถ้าเป็นหัวข้อเปล่าก็ไล่หาบรรทัดลูก "- วงเงิน..." แล้วเลือกตาม amount_m
 
+รองรับ target โหมด max_tier/top_tier/max_all (①②③ "อัตราสูงสุด" — ดู CLAUDE.md) เหมือน SCB/KTB/BAY/KBANK
+โดยเส้นทาง cell เดิมข้างบนไม่ถูกแตะเลยสักบรรทัด (`_collect_max_tiers`/`_make_value_of` เป็นฟังก์ชันคู่ขนาน
+ใหม่ ดูหัวข้อ "โหมด max_tier/top_tier/max_all" ก่อน `_tenor_unit`) **ต่างจาก SCB/KTB/BAY/KBANK ตรงที่ค่า
+โหมด max ต้องผ่านการ "โหวต" ข้าม OCR variant ก่อนยอมรับ** (≥2 variant อ่านตรงกัน — ดู `VOTE_MIN` และ
+docstring ของ `extract_rates`) เพราะพิสูจน์แล้วว่า OCR อ่านค่าสูงสุด "สูงเกินจริง" ได้จริงและผ่าน
+`MIN_WORD_CONF` ปกติทุกอย่าง (เช่น 0.75 → OCR อ่านเป็น 0,76 conf 81) ถ้าเชื่อ variant แรกเหมือน cell
+ค่าที่ผิดจะกลายเป็นคำตอบทันที — โหวตแก้ได้เพราะ variant อื่นอ่านถูก 2 ใน 3 ครั้ง เคสทองที่พิสูจน์ ①≠②
+ในไฟล์ปัจจุบันเลย (ไม่ต้องย้อนหาไฟล์เก่า): "7. สะสมทรัพย์ e-Savings" แบ่ง tier ไม่เกิน 1 ล้านบาท = 1.25
+กับ ส่วนที่เกิน 1 ล้านบาท = 0.35 → ① = 1.25, ② = 0.35
+
 หลักการ anchoring ที่ต้องระวัง (ทั้งหมดเจอจริงตอนทดสอบ 8 ฉบับ — อย่ารื้อโดยไม่ทดสอบซ้ำ):
   - **ห้าม anchor ด้วยเลขข้อ** เพราะเลื่อนตามปี (12 เดือน = ข้อ 8.8 ปี 2023 แต่ = 9.9 ปี 2026)
   - หัวข้อ "ประจำ" ต้องเทียบ skeleton แบบ "เท่ากันทั้งบรรทัด" ไม่ใช่ substring ไม่งั้นชน "ประจำขวัญบัวหลวง"
@@ -50,6 +60,7 @@ import pdfplumber
 from .. import common
 from ..common import log, THAI_MONTHS
 from ._tablekit import thai_skeleton
+from . import _maxscan
 
 PARSER_IDS = ["bbl"]
 
@@ -64,6 +75,12 @@ OCR_TIMEOUT_SEC = 180
 MIN_WORD_CONF = 60.0         # ค่าที่อ่านได้จริงมี conf 76-95; ต่ำกว่า 60 = ไม่น่าเชื่อถือ ทิ้ง
 MIN_CLUSTER_MEMBERS = 5      # คอลัมน์จริงมีค่าหลายสิบตัว — cluster เล็กกว่านี้คือ noise จาก OCR
 MAX_PLAUSIBLE_RATE = 10.0
+
+# target โหมด max_tier/top_tier/max_all (①②③ "อัตราสูงสุด") เสี่ยงต่อ OCR อ่าน "สูงเกินจริง" เป็นพิเศษ
+# (พิสูจน์แล้วกับไฟล์จริง — ดู CLAUDE.md: variant[0] อ่าน 0.75 เป็น 0,76 conf 81 ผ่านเกณฑ์ MIN_WORD_CONF
+# ปกติทุกอย่าง) จึงต้องให้ ≥2 OCR variant อ่าน "ตรงกัน" ก่อนยอมรับค่า (ไม่ใช่แค่ variant แรกที่อ่านได้แบบ
+# cell) — ต่ำกว่านี้ปล่อยว่างไว้ ไม่เดา (ดู extract_rates ส่วนโหวต)
+VOTE_MIN = 2
 
 # ไฟล์สแกนคุณภาพต่ำ (พบจริง: ขนาด 300-400KB เทียบกับ 1.1-1.6MB ของไฟล์ปกติ) ทำให้ tesseract อ่าน "ป้ายชื่อ"
 # แถว/หมวดเพี้ยนได้ (ตัวเลขอัตรามักอ่านถูก แค่ป้ายที่ผิด) — ไม่มี config เดียวที่ชนะทุกไฟล์ที่พังจึงลองไล่ทีละ
@@ -351,6 +368,43 @@ def _pick_tier(tiers: list, amount_m: float | None) -> tuple[dict, str]:
     return line, f"{desc} (fallback: วงเงิน {amount_m:g} ล้านบาท ไม่เข้า tier ใดเลย)"
 
 
+# ─────────────────────────── โหมด max_tier/top_tier/max_all (①②③ "อัตราสูงสุด") ───────────────────────────
+# path คู่ขนานกับ _collect_tiers/_pick_tier ด้านบน — ไม่แตะของเดิมเลยสักบรรทัด (ดู CLAUDE.md)
+def _collect_max_tiers(lines: list[dict], row_idx: int, end: int) -> list[tuple]:
+    """เก็บ tier ทุกตัวของแถวที่พบ → (kind, lower_m, upper_m, desc, raw_line) ตามที่ _maxscan.select()/
+    tier_rank() ต้องการ — reuse _collect_tiers เดิมแล้วแปลงรูปแบบ (ไม่ใช้ _maxscan.classify_tier_ext
+    เพราะ _TIER_RULES ของไฟล์นี้จำแนก tier ได้ถูกต้องอยู่แล้ว [รวมเคส OCR เพี้ยนของ BBL] — reuse ตัวจำแนก
+    เดิมปลอดภัยกว่าเขียนตัวกลางใหม่ เหมือน KTB/BAY/KBANK)
+    _TIER_RULES index ↔ kind: 0 "above" (เกิน N) · 1 "up_to" (ไม่เกิน N) · 2 "less_than" (น้อยกว่า N) ·
+    3 "at_least" (ตั้งแต่ N ขึ้นไป) — _TIER_RULES[i][1] เก็บชื่อ kind ไว้ตรงตัวอยู่แล้ว ใช้ต่อได้เลย
+    แถวที่ค่าอยู่บนบรรทัดหัวเอง (ไม่แบ่ง tier) คืน tier เดียว kind 'single' เหมือน bay.py"""
+    line = lines[row_idx]
+    if _data_words(line):
+        return [("single", 0.0, None, "ไม่แบ่ง tier วงเงิน (อัตราเดียวทุกวงเงิน)", line)]
+    raw = _collect_tiers(lines, row_idx, end)
+    out: list[tuple] = []
+    for rule_idx, amount, desc, ln in raw:
+        kind = _TIER_RULES[rule_idx][1]
+        if kind in ("above", "at_least"):
+            out.append((kind, amount, None, desc, ln))
+        else:  # up_to / less_than
+            out.append((kind, 0.0, amount, desc, ln))
+    return out
+
+
+def _make_value_of(cols: list[float]):
+    """closure คืน callback value_of(tier, col) สำหรับ _maxscan.select() — เรียก _cell_value() เดิม
+    (คอลัมน์เดียวกับโหมด cell ทุกประการ) แล้วคืน None ถ้า conf < MIN_WORD_CONF (ด่านความมั่นใจของ OCR
+    ต้องอยู่ในเส้นทาง max ด้วย ไม่งั้นค่ามั่วความมั่นใจต่ำจะชนะทันที) ส่วนช่วง 0-10 เช็คอยู่แล้วใน
+    _maxscan._valid_rate() (= MAX_PLAUSIBLE_RATE เดิม)"""
+    def value_of(tier: tuple, col: int) -> float | None:
+        rate, conf = _cell_value(tier[4], cols, col)
+        if rate is None or conf < MIN_WORD_CONF:
+            return None
+        return rate
+    return value_of
+
+
 def _tenor_unit(line: dict, tenor: int) -> str | None:
     """skeleton ของ "หน่วย" ที่ตามหลังเลข tenor ในบรรทัด (None ถ้าบรรทัดไม่มีเลขนั้น)
     เทียบเลขแบบ int ตรง ๆ กัน "1" ไปแมตช์ "12"; OCR แตกอักษรไทยเป็นหลาย token ("เด","ื","อ","น")
@@ -466,7 +520,13 @@ def _locate_row(lines: list[dict], target: dict, key: str) -> tuple[int | None, 
 def _extract_targets(lines: list[dict], targets: list[dict],
                      keys: set[str] | None = None) -> tuple[dict, dict, list[str]]:
     """อ่านค่าของ targets ที่ระบุจาก lines ของ OCR variant หนึ่ง (keys=None คือทุกตัว)
-    คืน (result, tiers_used, failed_keys) — คอลัมน์จับไม่ได้ตามที่คาด = ทุก target ที่ขอ 'ล้มเหลว' หมด"""
+    คืน (result, tiers_used, failed_keys) — คอลัมน์จับไม่ได้ตามที่คาด = ทุก target ที่ขอ 'ล้มเหลว' หมด
+
+    mode='cell' (ค่าเริ่มต้น ไม่ระบุก็ได้) ใช้เส้นทางเดิมทุกบรรทัด **ไม่แตะ** — mode ∈ _maxscan.MODES
+    ('max_tier'①/'top_tier'②/'max_all'③ — "อัตราสูงสุด" ดู CLAUDE.md) ใช้เส้นทางคู่ขนานที่เก็บ tier ด้วย
+    _collect_max_tiers() แล้วให้ _maxscan.select() ตัดสินใจแทน _pick_tier()/amount_m เดิม
+    หมายเหตุ: ค่าที่ได้จากกิ่ง max ในฟังก์ชันนี้ยังไม่ผ่านการโหวตข้าม OCR variant — extract_rates
+    (ผู้เรียก) เป็นผู้สะสมโหวตจากผลของฟังก์ชันนี้ที่เรียกซ้ำทุก variant อีกที (ดู extract_rates)"""
     wanted = [t for t in targets if keys is None or t["key"] in keys]
 
     cols = _column_centers(lines)
@@ -481,48 +541,78 @@ def _extract_targets(lines: list[dict], targets: list[dict],
 
     for target in wanted:
         key = target["key"]
+        mode = target.get("mode", "cell")
 
-        depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
-        col = resolve_depositor(depositor_value)
-        if col is None:
-            log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
-            failed.append(key); continue
-
-        row_idx, end, row_desc = _locate_row(lines, target, key)
-        if row_idx is None:
-            failed.append(key); continue
-
-        # แถวมีค่าอยู่บนบรรทัดเดียวกัน = ไม่แบ่ง tier; ถ้าเป็นหัวข้อเปล่า ให้ไปหาบรรทัดลูก "- วงเงิน..."
-        line = lines[row_idx]
-        amount_m = target.get("amount_m")
-        if _data_words(line):
-            tier_desc = "ไม่แบ่ง tier วงเงิน (อัตราเดียวทุกวงเงิน)"
-        else:
-            tiers = _collect_tiers(lines, row_idx, end)
-            if not tiers:
-                log.error(f"extract_rates [{key}]: แถว '{row_desc}' ไม่มีค่าอัตรา และไม่มีบรรทัดวงเงินย่อย "
-                          f"— ข้าม target นี้: {line['text'][:60]}")
+        if mode == "cell":
+            depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
+            col = resolve_depositor(depositor_value)
+            if col is None:
+                log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
                 failed.append(key); continue
-            line, tier_desc = _pick_tier(tiers, amount_m)
 
-        rate, conf = _cell_value(line, cols, col)
-        if rate is None:
-            log.error(f"extract_rates [{key}]: ไม่มีค่าในคอลัมน์ {col} ({depositor_value}) ของแถวนี้ "
-                      f"(อาจเป็น '-') — ข้าม target นี้: {line['text'][:60]}")
-            failed.append(key); continue
-        if conf < MIN_WORD_CONF:
-            log.error(f"extract_rates [{key}]: OCR อ่านค่า {rate} ด้วยความมั่นใจต่ำ ({conf:.0f}% < "
-                      f"{MIN_WORD_CONF:.0f}%) — ไม่เชื่อถือ ข้าม target นี้")
-            failed.append(key); continue
-        if not (0.0 <= rate <= MAX_PLAUSIBLE_RATE):
-            log.error(f"extract_rates [{key}]: ค่า {rate} อยู่นอกช่วงที่เป็นไปได้ (0-{MAX_PLAUSIBLE_RATE}) "
-                      f"— OCR น่าจะอ่านผิด ข้าม target นี้")
+            row_idx, end, row_desc = _locate_row(lines, target, key)
+            if row_idx is None:
+                failed.append(key); continue
+
+            # แถวมีค่าอยู่บนบรรทัดเดียวกัน = ไม่แบ่ง tier; ถ้าเป็นหัวข้อเปล่า ให้ไปหาบรรทัดลูก "- วงเงิน..."
+            line = lines[row_idx]
+            amount_m = target.get("amount_m")
+            if _data_words(line):
+                tier_desc = "ไม่แบ่ง tier วงเงิน (อัตราเดียวทุกวงเงิน)"
+            else:
+                tiers = _collect_tiers(lines, row_idx, end)
+                if not tiers:
+                    log.error(f"extract_rates [{key}]: แถว '{row_desc}' ไม่มีค่าอัตรา และไม่มีบรรทัดวงเงินย่อย "
+                              f"— ข้าม target นี้: {line['text'][:60]}")
+                    failed.append(key); continue
+                line, tier_desc = _pick_tier(tiers, amount_m)
+
+            rate, conf = _cell_value(line, cols, col)
+            if rate is None:
+                log.error(f"extract_rates [{key}]: ไม่มีค่าในคอลัมน์ {col} ({depositor_value}) ของแถวนี้ "
+                          f"(อาจเป็น '-') — ข้าม target นี้: {line['text'][:60]}")
+                failed.append(key); continue
+            if conf < MIN_WORD_CONF:
+                log.error(f"extract_rates [{key}]: OCR อ่านค่า {rate} ด้วยความมั่นใจต่ำ ({conf:.0f}% < "
+                          f"{MIN_WORD_CONF:.0f}%) — ไม่เชื่อถือ ข้าม target นี้")
+                failed.append(key); continue
+            if not (0.0 <= rate <= MAX_PLAUSIBLE_RATE):
+                log.error(f"extract_rates [{key}]: ค่า {rate} อยู่นอกช่วงที่เป็นไปได้ (0-{MAX_PLAUSIBLE_RATE}) "
+                          f"— OCR น่าจะอ่านผิด ข้าม target นี้")
+                failed.append(key); continue
+
+            desc = f"{row_desc} · {tier_desc} · คอลัมน์ {col} ({depositor_value})"
+            log.info(f"  {target.get('label', key)}: {rate:.2f}%  ← {desc} [OCR conf {conf:.0f}%]")
+
+        elif mode in _maxscan.MODES:
+            col = None
+            if mode != "max_all":
+                depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
+                col = resolve_depositor(depositor_value)
+                if col is None:
+                    log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
+                    failed.append(key); continue
+
+            row_idx, end, row_desc = _locate_row(lines, target, key)
+            if row_idx is None:
+                failed.append(key); continue
+
+            tiers = _collect_max_tiers(lines, row_idx, end)
+            value_of = _make_value_of(cols)
+            rate, mdesc = _maxscan.select(mode, tiers, col, DEPOSITOR_COLUMNS, value_of)
+            if rate is None:
+                log.error(f"extract_rates [{key}]: {mdesc} (ค่าที่อ่านได้รอบนี้ — ยังไม่ผ่านโหวต) — ข้าม target นี้")
+                failed.append(key); continue
+
+            desc = f"{row_desc} · {mdesc}"
+            log.info(f"  {target.get('label', key)}: {rate:.2f}%  ← {desc}  (รอบนี้ — รอโหวตข้าม OCR variant)")
+
+        else:
+            log.error(f"extract_rates [{key}]: ไม่รู้จัก mode '{mode}' — ข้าม target นี้")
             failed.append(key); continue
 
-        desc = f"{row_desc} · {tier_desc} · คอลัมน์ {col} ({depositor_value})"
         result[key] = rate
         tiers_used[key] = desc
-        log.info(f"  {target.get('label', key)}: {rate:.2f}%  ← {desc} [OCR conf {conf:.0f}%]")
 
     return result, tiers_used, failed
 
@@ -530,16 +620,26 @@ def _extract_targets(lines: list[dict], targets: list[dict],
 def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
     """อ่านอัตราตาม rate_targets — รองรับทั้งแถวเงินฝากประจำ (tenor_months) และแถวชื่อผลิตภัณฑ์
     (row_keyword เช่น สะสมทรัพย์) และรองรับ tier วงเงิน (amount_m) กับทุกแถวเสมอ ไม่ว่าประกาศฉบับนั้น
-    จะแบ่ง tier หรือไม่ก็ตาม (ดูหมายเหตุที่ _TIER_RULES)
+    จะแบ่ง tier หรือไม่ก็ตาม (ดูหมายเหตุที่ _TIER_RULES) target โหมด max_tier/top_tier/max_all
+    (①②③ "อัตราสูงสุด" ดู CLAUDE.md) ใช้เส้นทางแยกที่ต้องโหวตข้าม OCR variant ก่อนยอมรับค่า (ดูย่อหน้าถัดไป)
 
     ไล่ลอง OCR_VARIANTS ทีละชุด — variant แรกอ่านทุก target, ชุดถัดไป**เติมเฉพาะ target ที่ยังขาด**
     (ไม่เขียนทับค่าที่อ่านได้แล้ว) ไฟล์ปกติจะอ่านครบตั้งแต่ variant แรกและไม่แตะ variant อื่นเลย
     — เสียเวลา OCR เพิ่มเฉพาะไฟล์สแกนคุณภาพต่ำที่ variant แรกอ่านป้ายไม่ออกเท่านั้น
-    ค่าที่ยังขาดหลังลองครบทุก variant จะถูกปล่อยว่างไว้ (ไม่เดา) — ดู rate_monitor.py ส่วนแจ้งเตือน"""
+    ค่าที่ยังขาดหลังลองครบทุก variant จะถูกปล่อยว่างไว้ (ไม่เดา) — ดู rate_monitor.py ส่วนแจ้งเตือน
+
+    **target โหมด max ต่างจาก cell**: ค่าสูงสุดอ่อนไหวต่อ OCR อ่าน "สูงเกินจริง" เป็นพิเศษ (ค่าที่อ่านผิด
+    กลายเป็นคำตอบทันทีถ้าเชื่อ variant แรกที่อ่านได้เหมือน cell — พิสูจน์แล้วว่าเป็นเคสจริง ไม่ใช่ทฤษฎี ดู
+    CLAUDE.md) จึงสะสม "โหวต" ต่อ key: ค่าที่ variant ต่าง ๆ อ่านได้ตรงกัน ≥ VOTE_MIN ครั้งจึงยอมรับ (ตัด
+    ออกจาก remaining แล้วหยุดลองต่อสำหรับ key นั้น) ครบทุก variant แล้วยังไม่มีค่าใดถึง VOTE_MIN เสียง →
+    ปล่อยว่างไว้ ไม่เดา พร้อม log.error แจกแจงผู้สมัครทั้งหมดที่เจอ (rate: จำนวนเสียง)"""
     targets = bank["rate_targets"]
+    max_keys = {t["key"] for t in targets if t.get("mode", "cell") in _maxscan.MODES}
     result: dict = {}
     tiers_used: dict = {}
     remaining = {t["key"] for t in targets}
+    # votes[key][rate] = (จำนวนเสียง, desc แรกที่ได้ค่านั้น) — เฉพาะ key ในกลุ่ม max_keys
+    votes: dict[str, dict[float, tuple[int, str]]] = {}
 
     for i, variant in enumerate(OCR_VARIANTS):
         if not remaining:
@@ -549,17 +649,48 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
             continue
         r, tu, _ = _extract_targets(lines, targets, keys=remaining)
         gained = set(r) & remaining
-        if gained:
-            lang, psm, dpi = variant
-            tag = "" if i == 0 else f" (OCR variant สำรอง #{i}: {lang}/psm{psm}/{dpi}dpi)"
-            log.info(f"bbl: กู้ค่าได้ {len(gained)} target เพิ่ม{tag}: {', '.join(sorted(gained))}")
-        result.update(r)
-        tiers_used.update(tu)
-        remaining -= gained
+        lang, psm, dpi = variant
+        tag = "" if i == 0 else f" (OCR variant สำรอง #{i}: {lang}/psm{psm}/{dpi}dpi)"
 
-    if remaining:
+        cell_gained = gained - max_keys
+        if cell_gained:
+            log.info(f"bbl: กู้ค่าได้ {len(cell_gained)} target เพิ่ม{tag}: {', '.join(sorted(cell_gained))}")
+        result.update({k: r[k] for k in cell_gained})
+        tiers_used.update({k: tu[k] for k in cell_gained})
+        remaining -= cell_gained
+
+        # target โหมด max: สะสมโหวตแทนที่จะเชื่อ variant แรกที่อ่านได้ทันทีแบบ cell (ดู docstring)
+        confirmed = set()
+        for k in gained & max_keys:
+            bucket = votes.setdefault(k, {})
+            count, first_desc = bucket.get(r[k], (0, tu[k]))
+            bucket[r[k]] = (count + 1, first_desc)
+        for k in remaining & max_keys:
+            for rate, (count, desc) in votes.get(k, {}).items():
+                if count >= VOTE_MIN:
+                    result[k] = rate
+                    tiers_used[k] = f"{desc} · ยืนยันตรงกัน {count} OCR variant"
+                    confirmed.add(k)
+                    break
+        if confirmed:
+            log.info(f"bbl: โหมดอัตราสูงสุดยืนยันค่าได้{tag}: {', '.join(sorted(confirmed))}")
+        remaining -= confirmed
+
+    cell_remaining = remaining - max_keys
+    if cell_remaining:
         log.error(f"extract_rates: อ่านค่าไม่ได้แม้ลองครบ {len(OCR_VARIANTS)} OCR variant: "
-                  f"{', '.join(sorted(remaining))} — ปล่อยว่างไว้")
+                  f"{', '.join(sorted(cell_remaining))} — ปล่อยว่างไว้")
+
+    for k in sorted(remaining & max_keys):
+        bucket = votes.get(k, {})
+        if bucket:
+            candidates = ", ".join(f"{rate:g} ({count} เสียง)" for rate, (count, _) in
+                                    sorted(bucket.items(), key=lambda kv: -kv[1][0]))
+            log.error(f"extract_rates [{k}]: ไม่มีค่าที่ยืนยันได้ครบ {VOTE_MIN} เสียง (ต้องมี OCR variant "
+                      f"อ่านตรงกันอย่างน้อย {VOTE_MIN} ครั้ง) — ผู้สมัคร: {candidates} — ปล่อยว่างไว้")
+        else:
+            log.error(f"extract_rates [{k}]: ไม่มี OCR variant ใดอ่านค่าได้เลยแม้ครบ {len(OCR_VARIANTS)} "
+                      f"variant — ปล่อยว่างไว้")
 
     if not result:
         log.error("extract_rates: อ่านค่าไม่ได้เลยสักตัว (ทุก target ล้มเหลว)")
@@ -567,6 +698,135 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
 
     result["tiers_used"] = tiers_used
     return result
+
+
+def _mode_value_for_variant(lines: list[dict], cols: list[float], target: dict, key: str, mode: str
+                            ) -> tuple[int | None, int, str, list[tuple], tuple[float, str] | None]:
+    """คำนวณผลลัพธ์ของ 1 mode (cell/max_tier/top_tier/max_all) จาก lines/cols ของ OCR variant เดียว
+    — ใช้เฉพาะใน debug_tiers() (ไม่ใช้ใน extract_rates ซึ่งมี _extract_targets ของตัวเองอยู่แล้ว)
+    คืน (row_idx, end, row_desc, tiers แบบ max, ผลของ mode นี้ [rate, desc] หรือ None)"""
+    row_idx, end, row_desc = _locate_row(lines, target, key)
+    if row_idx is None:
+        return None, 0, "", [], None
+
+    tiers = _collect_max_tiers(lines, row_idx, end)
+
+    if mode == "cell":
+        depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
+        col = resolve_depositor(depositor_value)
+        if col is None:
+            return row_idx, end, row_desc, tiers, None
+        line = lines[row_idx]
+        amount_m = target.get("amount_m")
+        if _data_words(line):
+            cell_line, tier_desc = line, "ไม่แบ่ง tier วงเงิน (อัตราเดียวทุกวงเงิน)"
+        else:
+            cell_tiers = _collect_tiers(lines, row_idx, end)
+            if not cell_tiers:
+                return row_idx, end, row_desc, tiers, None
+            cell_line, tier_desc = _pick_tier(cell_tiers, amount_m)
+        rate, conf = _cell_value(cell_line, cols, col)
+        if rate is None or conf < MIN_WORD_CONF or not (0.0 <= rate <= MAX_PLAUSIBLE_RATE):
+            return row_idx, end, row_desc, tiers, None
+        return row_idx, end, row_desc, tiers, (rate, f"{tier_desc} · คอลัมน์ {col} ({depositor_value})")
+
+    # max_tier / top_tier / max_all
+    col = None
+    if mode != "max_all":
+        col = resolve_depositor(target.get("depositor", DEFAULT_DEPOSITOR))
+        if col is None:
+            return row_idx, end, row_desc, tiers, None
+    value_of = _make_value_of(cols)
+    rate, desc = _maxscan.select(mode, tiers, col, DEPOSITOR_COLUMNS, value_of)
+    return row_idx, end, row_desc, tiers, (rate, desc) if rate is not None else None
+
+
+def debug_tiers(pdf_bytes: bytes, bank: dict) -> list[dict] | None:
+    """ใช้กับ CLI `--show-tiers BBL` — คืนรูปแบบเดียวกับ bay/scb (คีย์ key/label/depositor/row_found/
+    results/tiers) เพื่อใช้ `_print_tiers_report()` เดิมใน rate_monitor.py ได้โดยไม่ต้องแก้ฝั่งนั้น
+
+    ต่างจากธนาคารอื่นตรงที่ต้องรันทุก OCR variant แล้วรายงาน **ค่าที่ผ่านโหวต** สำหรับโหมด ①②③ เท่านั้น
+    (cell ใช้ variant แรกที่อ่านได้ เหมือน extract_rates จริง — ไม่มีกลไกโหวต) พร้อมจำนวนเสียงต่อค่าใน
+    สตริง desc (เช่น "① สูงสุดทุกวงเงิน (...) [โหวต 2/3 variant · ผู้สมัคร: 0.75 (2 เสียง), 0.76 (1 เสียง)]")
+    เพื่อให้ตรวจตาเห็นความไม่ตรงกันระหว่าง variant ก่อนติ๊กใช้จริง — log.info พิมพ์รายละเอียดผู้สมัครทุก
+    target/mode ออกคอนโซลด้วยเสมอ (ไม่ใช่แค่ค่าที่ผ่านโหวต) เพราะ `_print_tiers_report()` เดิมพิมพ์แค่ "-"
+    เมื่อไม่มีค่า ไม่พิมพ์เหตุผล ส่วน `tiers` (คอลัมน์ค่าดิบ) ใช้ของ variant แรกที่หาแถวเจอเท่านั้น"""
+    report: list[dict] = []
+
+    for target in bank["rate_targets"]:
+        key = target["key"]
+        depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
+        item: dict = {"key": key, "label": target.get("label", key), "depositor": depositor_value}
+
+        row_found: str | None = None
+        tiers_display: list[tuple] = []
+        tiers_cols: list[float] = []
+        cell_result: tuple[float, str] | None = None
+        # votes[mode][rate] = [จำนวนเสียง, desc แรก, [variant idx ที่เห็นด้วย]]
+        votes: dict[str, dict[float, list]] = {m: {} for m in _maxscan.MODES}
+        variants_tried = 0
+
+        for vi, variant in enumerate(OCR_VARIANTS):
+            lines = _page1_lines(pdf_bytes, variant)
+            if lines is None:
+                continue
+            cols = _column_centers(lines)
+            if len(cols) != EXPECTED_COLUMNS:
+                continue
+
+            row_idx, end, row_desc, tiers, cell_val = _mode_value_for_variant(lines, cols, target, key, "cell")
+            if row_idx is None:
+                continue
+            variants_tried += 1
+            if row_found is None:
+                row_found = lines[row_idx]["text"]
+                tiers_display, tiers_cols = tiers, cols
+            if cell_result is None and cell_val is not None:
+                cell_result = cell_val
+
+            for mode in _maxscan.MODES:
+                _, _, _, _, val = _mode_value_for_variant(lines, cols, target, key, mode)
+                if val is None:
+                    continue
+                rate, desc = val
+                bucket = votes[mode].setdefault(rate, [0, desc, []])
+                bucket[0] += 1
+                bucket[2].append(vi)
+
+        item["row_found"] = row_found
+        results: dict = {}
+        if cell_result is not None:
+            results["cell"] = cell_result
+
+        for mode in _maxscan.MODES:
+            bucket = votes[mode]
+            if not bucket:
+                continue
+            candidates = ", ".join(
+                f"{rate:g} ({info[0]} เสียง · variant#{','.join(map(str, info[2]))})"
+                for rate, info in sorted(bucket.items(), key=lambda kv: -kv[1][0]))
+            best_rate, (best_count, best_desc, best_variants) = max(bucket.items(), key=lambda kv: kv[1][0])
+            if best_count >= VOTE_MIN:
+                log.info(f"[{key}] {mode}: ยืนยัน {best_rate:g}% ({best_count}/{variants_tried} variant "
+                         f"· variant#{','.join(map(str, best_variants))}) — ผู้สมัครทั้งหมด: {candidates}")
+                results[mode] = (best_rate, f"{best_desc} [โหวต {best_count}/{variants_tried} variant "
+                                            f"· ผู้สมัคร: {candidates}]")
+            else:
+                log.info(f"[{key}] {mode}: ไม่ผ่านโหวต (ต้องการ {VOTE_MIN}/{variants_tried} variant) "
+                         f"— ผู้สมัครทั้งหมด: {candidates}")
+                results[mode] = (None, f"ไม่ผ่านโหวต — ผู้สมัคร: {candidates}")
+        item["results"] = results
+
+        item["tiers"] = [
+            {"desc": t[3],
+             "col_values": {DEPOSITOR_COLUMNS[c][0]: (
+                 lambda rate: "-" if rate is None else f"{rate:g}"
+             )(_cell_value(t[4], tiers_cols, c)[0]) for c in DEPOSITOR_COLUMNS}}
+            for t in tiers_display
+        ]
+        report.append(item)
+
+    return report
 
 
 # ─────────────────────────── Effective date (OCR หัวกระดาษ) ───────────────────────────

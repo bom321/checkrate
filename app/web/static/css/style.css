@@ -157,6 +157,16 @@ input[type=text], input[type=number], input[type=url], textarea, select {
 }
 input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-color: var(--brand); }
 
+/* select — ถอด chrome ของ OS ออก (native select มี metric ของตัวเอง ไม่สนใจ padding ที่ตั้งไว้ข้างบน
+   จึงสูงไม่เท่า input ที่อยู่ข้างกันในฟอร์มเดียว) แล้ววาดลูกศรเองด้วย background SVG
+   ใช้ทุกหน้า: เลือกปี/เดือนของ /logs · / · /bank/{code} · /manual และ dropdown โหมดของ /config */
+select {
+  -webkit-appearance: none; appearance: none; cursor: pointer; padding-right: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M1 3l4 4 4-4' fill='none' stroke='%237A7D83' stroke-width='1.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+select:disabled { background-image: none; cursor: not-allowed; }
+
 /* toggle เปิด-ปิด (สวิตช์เลื่อน) — checkbox จริงซ่อนอยู่ข้างใต้ JS จึงอ่าน .checked ได้ตามเดิม */
 .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -171,7 +181,8 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 .switch input:checked + .switch-track { background: var(--brand); }
 .switch input:checked + .switch-track .switch-knob { transform: translateX(14px); }
 .switch input:focus-visible + .switch-track { outline: 2px solid #BEE3CE; outline-offset: 2px; }
-.switch-text { color: #3C3F45; }
+/* min-width กันข้อความ "เปิดใช้งาน"/"ปิดใช้งาน" ที่ยาวไม่เท่ากันดันปุ่ม chevron ขยับตอนสลับ */
+.switch-text { color: #3C3F45; min-width: 56px; }
 .cfg-bank.off .switch-text { color: var(--muted); }
 /* checkbox ธรรมดา (auto-refresh) — ไม่ต้องเป็นสวิตช์ */
 .switch.plain { font-size: 12.5px; font-weight: 400; color: #6E7178; gap: 6px; }
@@ -197,19 +208,20 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 .cfg-email-hint { font-size: 11.5px; color: var(--muted); }
 .cfg-email-eff { margin-top: 10px; font-size: 11.5px; color: var(--muted); }
 
-/* คำอธิบายช่องที่กรอกยาก */
-.cfg-legend {
-  background: #F3F1EC; border: 1px solid var(--line); border-radius: 12px;
-  padding: 13px 16px; margin-bottom: 22px;
-  display: flex; flex-direction: column; gap: 8px;
+/* แถบสรุปสถิติด้านบน — จำนวนธนาคารเปิดใช้งาน / อัตราที่ติดตามทั้งหมด / คำอธิบาย cache สั้น ๆ */
+.cfg-strip {
+  display: flex; gap: 0; background: var(--card); border: 1px solid #E4E1DA; border-radius: 14px;
+  box-shadow: var(--shadow); padding: 4px; margin-bottom: 16px; flex-wrap: wrap;
 }
-.cfg-legend-row { display: flex; gap: 10px; align-items: baseline; }
-.cfg-legend-row > span:last-child { font-size: 11.5px; color: #7A7D83; line-height: 1.55; }
-.cfg-legend-chip {
-  flex: none; width: 122px; text-align: center;
-  font-size: 10.5px; font-weight: 600; color: #5C5F65;
-  background: #E4E0D8; padding: 3px 8px; border-radius: 5px;
+.cfg-strip-item { flex: 1; min-width: 150px; padding: 12px 18px; }
+.cfg-strip-item.wide { flex: 1.4; min-width: 200px; display: flex; align-items: center; }
+.cfg-strip-item.wide p { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.cfg-strip-div { width: 1px; background: var(--line); margin: 10px 0; }
+.cfg-strip-num {
+  font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1;
 }
+.cfg-strip-of { font-size: 14px; font-weight: 400; color: var(--muted-soft); }
+.cfg-strip-label { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 
 .cfg-banks-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -218,25 +230,27 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 .cfg-banks-title { font-size: 13px; font-weight: 600; color: #3C3F45; }
 .cfg-banks-count { font-size: 11.5px; color: var(--muted); }
 
-/* การ์ดธนาคาร — พับ/กางได้ */
+/* การ์ดธนาคาร — พับ/กางได้ · แถบสีซ้าย (accent) + เนื้อหา */
 .cfg-bank {
-  background: var(--card); border: 1px solid #E4E1DA; border-radius: 16px;
+  display: flex; background: var(--card); border: 1px solid #E4E1DA; border-radius: 16px;
   box-shadow: var(--shadow); margin-bottom: 12px; overflow: hidden;
 }
 .cfg-bank.off { background: #FBFAF8; }
+.cfg-bank-accent { width: 4px; flex: none; }
+.cfg-bank-content { flex: 1; min-width: 0; }
 .cfg-bank-head {
   display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
   padding: 15px 20px; cursor: pointer; user-select: none;
 }
-.cfg-bank.open .cfg-bank-head { border-bottom: 1px solid #F0EDE7; background: #FCFBF9; }
 .cfg-bank-ident { display: flex; align-items: center; gap: 13px; }
 .cfg-logo {
-  width: 34px; height: 34px; flex: none; border-radius: 9px; object-fit: contain;
+  width: 38px; height: 38px; flex: none; border-radius: 10px; object-fit: contain;
   background: var(--surface); border: 1px solid #E4E1DA;
 }
+/* ธนาคารที่ไม่มีไฟล์โลโก้ — กล่องตัวอักษรย่อบนพื้น tint สีธนาคาร (สีมาจาก inline style ที่ config.js ใส่) */
 .cfg-logo.mono {
   display: flex; align-items: center; justify-content: center;
-  font: 600 13px var(--mono); color: var(--muted);
+  font: 600 16px var(--mono); color: var(--muted); border-color: transparent;
 }
 .cfg-bank.off .cfg-logo { opacity: .5; }
 .cfg-bank-name { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
@@ -254,6 +268,8 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 .cfg-bank:not(.open) .cfg-chevron { transform: rotate(-90deg); }
 
 .cfg-bank:not(.open) .cfg-bank-body { display: none; }
+/* ส่วนที่กางออกเป็นพื้นครีม — การ์ดอัตราสีขาวข้างในจึงเด้งออกมาเห็นชัด (หัวการ์ดคงพื้นขาวไว้) */
+.cfg-bank-body { border-top: 1px solid #F0EDE7; background: #FCFBF9; }
 
 /* ลิงก์เอกสาร */
 .cfg-urls {
@@ -268,44 +284,128 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 .cfg-field input { font-size: 12px; padding: 8px 10px; border-color: #E4E1DA; }
 .cfg-doc-link { font-size: 12px; }
 
-/* ตารางอัตราที่ติดตาม */
+/* หัวรายการอัตราที่ติดตาม */
 .cfg-targets-head {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 15px 20px 11px;
+  gap: 12px; padding: 16px 20px 12px; flex-wrap: wrap;
 }
-.cfg-targets-title { font-size: 12px; font-weight: 600; color: #3C3F45; }
+.cfg-targets-labels { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.cfg-targets-title { font-size: 12.5px; font-weight: 600; color: #3C3F45; flex: none; }
+.cfg-targets-hint { font-size: 11px; color: var(--muted-soft); }
 .cfg-add {
   border: 1px solid #CFE6DA; background: #F1F9F4; color: var(--brand);
   font: 600 11.5px var(--sans); padding: 7px 13px; border-radius: 8px; cursor: pointer;
 }
 .cfg-add:hover { background: var(--brand-soft); }
 
-.cfg-table { padding: 0 12px 14px; }
-.cfg-table-inner { border: 1px solid #EDEAE3; border-radius: 12px; overflow: hidden; }
-.cfg-t-row {
-  display: grid; grid-template-columns: 1.05fr 1.25fr 1.25fr .95fr .55fr .6fr 1.4fr 30px;
-  gap: 10px; align-items: center; padding: 9px 14px; background: var(--card);
+/* รายการอัตราที่ติดตาม — การ์ดพับ/กางได้ทีละรายการ */
+.targets-list { display: flex; flex-direction: column; gap: 8px; padding: 0 20px 4px; }
+.cfg-t-card { border: 1px solid #ECE8E1; border-radius: 12px; background: var(--card); padding: 12px 14px; }
+.cfg-t-card-head { display: flex; align-items: center; gap: 10px; }
+.cfg-t-chevron {
+  flex: none; border: none; background: none; cursor: pointer; padding: 4px;
+  color: var(--muted-soft); font-size: 11px; transition: transform .15s;
 }
-.cfg-t-head {
-  padding: 11px 14px; background: #F4F1EB;
-  font-size: 10.5px; font-weight: 600; color: var(--muted); letter-spacing: .02em;
+.cfg-t-card:not(.open) .cfg-t-chevron { transform: rotate(-90deg); }
+/* padding แนวตั้ง 5px = ช่องไฟบน-ล่างระหว่างกรอบช่องกรอก (ที่ขึ้นตอนโฟกัส/ตอนแก้คีย์) กับกรอบนอก
+   ไม่ให้กรอบสองชั้นแนบกันจนดูอึดอัด — ห้ามลดเหลือ 0 พร้อมกับเพิ่ม --cfg-t-field-h แทน ผลไม่เหมือนกัน */
+.cfg-t-titlewrap {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  border: 1px solid #E4E1DA; border-radius: 8px; background: #FBFAF8; padding: 5px 10px; cursor: pointer;
 }
-.cfg-t-head .num { text-align: center; }
-.targets-list .cfg-t-row { border-top: 1px solid #F0EDE7; }
-.targets-list .cfg-t-row:nth-child(even) { background: #FBFAF8; }
-.cfg-t-cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.cfg-t-lab { display: none; font-size: 10.5px; font-weight: 600; color: var(--muted); }
-.cfg-t-row input {
-  min-width: 0; font-size: 12px; padding: 7px 9px; border-radius: 7px; border-color: #E4E1DA;
+/* ชื่อกว้างพอดีตัว (ไม่ยืด) เพื่อให้คีย์ต่อท้ายชื่อทันที ไม่ถูกดันไปติดขวาสุด
+   ต้องเจาะจงกว่ากฎรวม `input[type=text]` (0,1,1) ที่ตั้ง width:100% ไว้ ไม่งั้นช่องชื่อยืดเต็มกรอบ
+   แล้วดันคีย์ไปทับปุ่ม ✕ — ใช้ selector สองชั้น (0,2,0)
+   border โปร่งใส + margin/padding หักลบกัน: ตอนโฟกัสขึ้นกรอบเขียวชุดเดียวกับช่องคีย์ได้โดยตัวอักษร
+   ไม่ขยับและความสูงของ .cfg-t-titlewrap ไม่เปลี่ยน (1+5+5+1 = 6+6) — ห้ามแก้ padding ด้านเดียว
+   ความสูงตายตัว --cfg-t-field-h เท่ากับช่องคีย์ (ดูกฎถัดไป) ไม่พึ่ง line-height อัตโนมัติ ซึ่งต่างกัน
+   ตามขนาดฟอนต์ของสองช่อง (ชื่อ 13.5px · คีย์ 11.5px) */
+.cfg-t-titlewrap { --cfg-t-field-h: 32px; }
+.cfg-t-titlewrap .cfg-t-name {
+  flex: 0 1 auto; width: 26ch; max-width: 100%; min-width: 0;
+  height: var(--cfg-t-field-h);
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  margin: 0 -6px; padding: 0 5px;
+  font-size: 13.5px; font-weight: 600; cursor: text;
 }
-.cfg-t-row input.num { text-align: center; }
-.cfg-t-row .t-key { background: var(--surface); color: #3C3F45; }
+/* กรอบตอนโฟกัสต้องหนาเท่าช่องคีย์ = border 1px สีแบรนด์ + ring 2px ชุดเดียวกับกฎรวม input:focus
+   (เดิมช่องชื่อสั่ง outline:none ทับกฎรวมไว้ เส้นจึงบางกว่าช่องคีย์ที่ได้ ring มาเต็ม)
+   ring วาดนอก border box ไม่กินพื้นที่ ตัวอักษรจึงไม่ขยับ และวางพอดีในกรอบนอกที่มี padding 5px/10px */
+.cfg-t-titlewrap .cfg-t-name:focus {
+  border-color: var(--brand); background: #fff; outline: 2px solid #BEE3CE;
+}
+
+/* คีย์มีสองสภาพ: ปกติเป็นข้อความ "(key) ✎" · คลิกแล้วสลับเป็นช่องกรอก (input ยังอยู่ใน DOM ตลอด
+   แค่ hidden — readFormIntoState() จึงอ่าน .t-key ได้เหมือนเดิม) margin-right:auto ดันที่ว่างไปทางขวา
+   ฟอนต์เป็น sans ชุดเดียวกับตัวหนังสือทั้งหน้า (ไม่ใช้ mono) — เล็กกว่าและจางกว่าชื่อที่แสดง เพื่อให้
+   ลำดับสายตายังเป็น "ชื่อก่อน คีย์ทีหลัง" ทั้งสองสภาพใช้ font/letter-spacing ชุดเดียวกัน
+   สลับ view↔input แล้วตัวอักษรจึงไม่ขยับ */
+.cfg-t-keyview {
+  flex: none; margin-right: auto; display: inline-flex; align-items: center; gap: 4px;
+  font: 600 11.5px var(--sans); letter-spacing: .02em; color: #8A8D93; cursor: text;
+}
+.cfg-t-keypen { font-size: 10px; letter-spacing: 0; color: #CFCBC2; }
+/* selector สองชั้นด้วยเหตุผลเดียวกับ .cfg-t-name — กฎรวมตั้ง width:100% ไว้ */
+.cfg-t-titlewrap .cfg-t-key {
+  flex: none; margin-right: auto; width: 160px; height: var(--cfg-t-field-h); padding: 0 8px;
+  border: 1px solid #CFE6DA; border-radius: 6px; background: #fff;
+  font: 600 11.5px var(--sans); letter-spacing: .02em; color: #6E7178;
+}
+/* ต้องชนะ display ของ .cfg-t-keyview ไม่งั้น attribute hidden ไม่มีผล (author rule ทับ UA rule) */
+.cfg-t-card-head [hidden] { display: none; }
+/* ป้ายบนหัวการ์ด — สองมิติที่ไม่เกี่ยวกัน จึงแยกป้ายและแยกโทนสี ไม่ใช่ป้ายเดียวสลับความหมาย:
+   .mode = ประเภทอัตรา (โทนแบรนด์ เพราะเปลี่ยนวิธีอ่านค่าทั้งแถว) · .dep = ผู้รับดอกเบี้ย
+   เช่น ราชการ/กองทุน (โทนกลางชุดเดียวกับป้ายรหัส .cfg-code) */
+.cfg-t-badges { flex: none; display: flex; align-items: center; gap: 6px; }
+.cfg-t-badge {
+  flex: none; font: 600 10px var(--sans); padding: 3px 9px; border-radius: 20px;
+}
+.cfg-t-badge.mode { color: var(--brand-ink); background: var(--brand-soft); }
+.cfg-t-badge.dep { color: #6E7178; background: #EEEBE4; }
 .cfg-t-del {
-  border: none; background: none; color: var(--down); font-size: 15px;
-  cursor: pointer; padding: 4px; border-radius: 6px; justify-self: center;
+  flex: none; border: none; background: none; color: var(--down); font-size: 15px;
+  cursor: pointer; padding: 4px; border-radius: 6px; line-height: 1;
 }
 .cfg-t-del:hover { background: var(--down-soft); }
+.cfg-t-summary { padding: 2px 0 0 30px; font-size: 11.5px; color: var(--muted-soft); }
+.cfg-t-card.open .cfg-t-summary { display: none; }
+.cfg-t-card:not(.open) .cfg-t-body, .cfg-t-card:not(.open) .cfg-t-hint { display: none; }
+/* "ระยะ (เดือน)"/"วงเงิน (ล้าน)" เป็น px ตายตัว (พอดีตัวเลข 3-4 หลัก + ป้ายชื่อ) ไม่ใช่ fr —
+   ทั้งสองช่องรับแค่ตัวเลขสั้น ๆ กว้างเท่าช่องข้อความจึงดูโหว่ · margin ซ้าย/ขวาดันให้แถวฟิลด์เริ่ม
+   ตรงกับช่องชื่อและจบก่อนปุ่ม ✕ ด้านบน (ความกว้างรวมพอ ๆ กับแถวหัวการ์ด ไม่ล้นออกไปกว้างกว่า) */
+.cfg-t-body {
+  display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 78px 88px; gap: 10px;
+  margin: 11px 33px 0 29px;
+}
+.cfg-t-cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+/* ป้ายชื่อช่องไล่ระดับตามความสำคัญ: ปกติอ่อน · "ประเภทอัตรา" (.mode) เข้มกว่าเพราะกำหนดพฤติกรรมทั้งแถว ·
+   ช่องที่โหมดปิดไป (.dim) จางสุด สื่อว่ากรอกไปก็ไม่มีผล */
+.cfg-t-lab { font-size: 10px; font-weight: 600; color: var(--muted-soft); letter-spacing: .02em; }
+.cfg-t-cell.mode .cfg-t-lab { color: var(--muted); }
+.cfg-t-cell.dim .cfg-t-lab { color: #CBCEC3; }
+/* height ตายตัวเท่ากันทั้ง input และ select — ไม่พึ่งการคำนวณความสูงของเบราว์เซอร์ที่ต่างกันสองชนิด */
+/* ใช้ background-color ไม่ใช่ shorthand — shorthand จะล้าง background-image (ลูกศร) ของกฎ select ทิ้ง */
+.cfg-t-body input, .cfg-t-body select {
+  min-width: 0; height: 34px; font-size: 12px; padding: 7px 9px; border-radius: 7px;
+  border: 1px solid #E4E1DA; background-color: #fff;
+}
+.cfg-t-body input.num { text-align: center; }
+.cfg-t-body select { background-color: var(--surface); color: #3C3F45; padding-right: 26px; }
+.cfg-t-body input:disabled, .cfg-t-body select:disabled {
+  background-color: #F4F1EB; color: var(--muted-soft); cursor: not-allowed;
+}
+.cfg-t-hint {
+  margin: 9px 33px 0 29px; font-size: 11px; color: #9B8A4E; background: #FBF6E8;
+  border: 1px solid #F0E6C8; border-radius: 8px; padding: 7px 11px; line-height: 1.5;
+}
 .cfg-t-empty { padding: 14px; font-size: 12.5px; color: var(--muted-soft); text-align: center; }
+
+/* กล่องอธิบายโหมดอัตราท้ายรายการ — คงที่ต่อธนาคาร (ข้ามถ้า parser ไม่รองรับโหมดสูงสุด) */
+.cfg-mode-legend {
+  margin: 14px 20px 18px; border: 1px solid #ECE8E1; border-radius: 12px; background: #FBFAF8;
+  padding: 12px 16px; font-size: 11px; color: #7A7D83; line-height: 1.6;
+}
+.cfg-mode-legend b { color: #5C5F65; }
 
 
 /* ══════════════ Log & รันตรวจสอบ (mockup 6a) ══════════════ */
@@ -342,7 +442,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
   font-size: 12.5px; font-weight: 500; color: #6E7178;
 }
 .f-sel select {
-  font-size: 12.5px; font-weight: 500; padding: 8px 12px;
+  font-size: 12.5px; font-weight: 500; padding: 8px 26px 8px 12px;
   border-radius: 8px; border: 1px solid var(--line-strong); color: #3C3F45;
 }
 
@@ -597,9 +697,9 @@ input:focus, textarea:focus, select:focus { outline: 2px solid #BEE3CE; border-c
 .ov-months a:hover { background: var(--surface); }
 .ov-months a.on { background: var(--ink); border-color: var(--ink); color: #fff; }
 .ov-months select {
-  width: auto; font-size: 11.5px; font-weight: 500; padding: 6px 12px;
+  width: auto; font-size: 11.5px; font-weight: 500; padding: 6px 24px 6px 12px;
   border-radius: 8px; border: 1px solid var(--line-strong); color: #5C5F65;
-  background: var(--card);
+  background-color: var(--card);
 }
 /* จำนวนประกาศในเดือนนั้น — 0 ประกาศยังต้องเลือกได้ แค่ทำให้จางลง */
 .ov-months .m-count {
@@ -853,17 +953,15 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .pg-head-actions { width: 100%; }
   .pg-head-actions .btn { flex: 1; }
 
-  /* จัดการอัตรา (6d): ลิงก์เอกสารเรียงเดี่ยว · แถวอัตราคลี่เป็นการ์ดฟิลด์แนวตั้ง */
-  .cfg-legend-row { flex-direction: column; gap: 5px; }
-  .cfg-legend-chip { width: auto; text-align: left; }
+  /* จัดการอัตรา (6d): ลิงก์เอกสารเรียงเดี่ยว · ฟิลด์ในการ์ดอัตราคลี่เป็นคอลัมน์เดียว */
+  .cfg-strip-item.wide { flex-basis: 100%; }
   .cfg-urls { grid-template-columns: 1fr; padding: 14px 16px; }
-  .cfg-bank-head, .cfg-targets-head { padding-left: 16px; padding-right: 16px; }
-  .cfg-table { padding: 0 10px 12px; }
-  .cfg-t-head { display: none; }
-  .cfg-t-row { grid-template-columns: 1fr; gap: 10px; padding: 14px 14px 14px; position: relative; }
-  .cfg-t-lab { display: block; }
-  .cfg-t-row input.num { text-align: left; }
-  .cfg-t-del { position: absolute; top: 10px; right: 10px; justify-self: end; }
+  .cfg-bank-head, .cfg-targets-head, .targets-list { padding-left: 16px; padding-right: 16px; }
+  /* จอแคบ: ยกเลิก margin ที่ใช้จัดแถวฟิลด์ให้ตรงกับหัวการ์ด (คอลัมน์เดียวแล้ว ไม่ต้องเผื่อปุ่ม ✕) */
+  .cfg-t-body { grid-template-columns: 1fr; margin-left: 0; margin-right: 0; }
+  .cfg-t-hint { margin-left: 0; margin-right: 0; }
+  .cfg-t-body input.num { text-align: left; }
+  .cfg-t-name { min-width: 40px; }
 
   /* Log (6c): ปุ่มเรียงเต็มแถว · ตัวกรองเลื่อนแนวนอน · log เป็นการ์ดต่อบรรทัด */
   .lg-actions .btn { flex: 1 1 100%; }
@@ -1090,10 +1188,21 @@ summary.ov-grid::-webkit-details-marker { display: none; }
 .upload-msg.err { color: var(--down); }
 
 /* ─────────────── กล่องช่วยเหลือแบบพับได้บนหน้า /config ─────────────── */
-.cfg-help { margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-.cfg-help > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: 13px; color: var(--brand); }
-.cfg-help[open] > summary { border-bottom: 1px solid var(--line); }
-.cfg-help-body { padding: 12px 16px; font-size: 12.5px; color: var(--ink); line-height: 1.6; }
+.cfg-help {
+  margin: 0 0 22px; border: 1px solid var(--line); border-radius: 12px; background: #F3F1EC; overflow: hidden;
+}
+.cfg-help > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; font-size: 12.5px; font-weight: 600; color: #3C3F45;
+}
+.cfg-help > summary::-webkit-details-marker { display: none; }
+.cfg-help-icon {
+  width: 18px; height: 18px; flex: none; border-radius: 5px; background: #E4E0D8; color: #5C5F65;
+  font: 600 12px var(--sans); display: flex; align-items: center; justify-content: center;
+}
+.cfg-help-hint { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 400; }
+.cfg-help[open] > summary { border-bottom: 1px solid #E7E3DB; }
+.cfg-help-body { padding: 12px 16px 16px; font-size: 12.5px; color: var(--ink); line-height: 1.6; }
 .cfg-help-body p { margin: 0 0 10px; }
 .cfg-help-body code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 .cfg-help-tbl { width: 100%; border-collapse: collapse; margin: 4px 0 12px; font-size: 12px; }

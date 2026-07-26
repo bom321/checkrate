@@ -33,6 +33,7 @@ from ._tablekit import (
     pick_amount_tier, parse_tier_type_and_amount,
     find_joined_row, find_joined_section,
 )
+from . import _maxscan
 
 PARSER_IDS = ["scb_passbook"]
 
@@ -127,7 +128,10 @@ def _find_row_line(lines: list[str], section_kw: str, row_kw: str,
 
     two-pass: pass 1 = จับรายบรรทัด (พฤติกรรมเดิมทุกตัวอักษร); pass 2 (เรียกเมื่อ pass 1 ล้มเหลว
     ทั้งกระบวน — หา section/row ไม่เจอ หรือเจอแต่ดึงค่าไม่ได้) = จับหัวข้อ/section ที่ pdfplumber
-    ตัดเป็น 2 บรรทัด ด้วย find_joined_* — กัน false positive เพราะเข้า pass 2 เฉพาะตอน pass 1 ไม่ได้ผล"""
+    ตัดเป็น 2 บรรทัด ด้วย find_joined_* — กัน false positive เพราะเข้า pass 2 เฉพาะตอน pass 1 ไม่ได้ผล
+
+    ห้ามแก้ฟังก์ชันนี้เพื่อรองรับโหมด max — เป็น path ของโหมด 'cell' เดิมที่ต้อง regression-free
+    เป๊ะ ๆ (ดู CLAUDE.md) โหมด max ใช้ _find_row_range() ด้านล่างแทน (หาแถวอย่างเดียว ไม่เลือก tier)"""
     # ── pass 1: รายบรรทัด ──
     start, end = _section_range(lines, section_kw)
     if start is not None:
@@ -166,10 +170,76 @@ def _find_row_line(lines: list[str], section_kw: str, row_kw: str,
     return _scan_tiers_and_pick(lines, tier_start, sec_end, row_line, amount_m)
 
 
-def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
-    """อ่านค่าอัตราดอกเบี้ยตาม rate_targets (แต่ละตัวกำหนด section/row/depositor เอง)"""
-    rate_targets = bank["rate_targets"]
+# ─────────────────────────── โหมด max_tier/top_tier/max_all (①②③ "อัตราสูงสุด") ───────────────────────────
+def _find_row_range(lines: list[str], section_kw: str,
+                     row_kw: str) -> tuple[str | None, int | None, int | None]:
+    """เหมือน _find_row_line แต่คืนแค่ 'แถวที่พบ + ช่วงหา tier ลูก' โดยไม่เลือก tier ด้วย amount_m
+    (row_line, tier_start, end) — ใช้กับโหมด max ที่ต้องเก็บ tier ทุกตัว ไม่ใช่เลือกตัวเดียว
+    ไม่แตะ/ไม่เรียก _scan_tiers_and_pick หรือ pick_amount_tier เลย จึงไม่กระทบ path โหมด cell"""
+    start, end = _section_range(lines, section_kw)
+    if start is not None:
+        row_idx = None
+        for i in range(start + 1, end):
+            if line_equals_kw(row_kw, lines[i]):
+                row_idx = i
+                break
+        if row_idx is None:
+            for i in range(start + 1, end):
+                if kw_in_line(row_kw, lines[i]):
+                    row_idx = i
+                    break
+        if row_idx is not None:
+            return lines[row_idx], row_idx + 1, end
 
+    if start is not None:
+        sec_start, sec_end = start + 1, end
+    else:
+        js = find_joined_section(lines, section_kw)
+        if js is None:
+            return None, None, None
+        sec_start = js + 1
+        sec_end = len(lines)
+        for i in range(sec_start, len(lines)):
+            if _TOP_LEVEL_RE.match(lines[i]):
+                sec_end = i
+                break
+
+    row_line, tier_start = find_joined_row(lines, sec_start, sec_end, row_kw)
+    if row_line is None:
+        return None, None, None
+    return row_line, tier_start, sec_end
+
+
+def _collect_max_tiers(row_line: str, lines: list[str], tier_start: int, end: int) -> list[tuple]:
+    """เก็บ tier ทุกตัวของแถวที่พบ (kind, lower_m, upper_m, desc, raw_line) ด้วย _maxscan.classify_tier_ext
+    (กว้างกว่า parse_tier_type_and_amount ที่ path โหมด cell ใช้ — รองรับ up_to/between/above และฟอนต์
+    ประกาศยุคเก่าที่ regex เดิมพลาด — ดู CLAUDE.md) แถวที่ไม่มี tier วงเงินเลย (ค่าอยู่บรรทัดเดียวกับหัวข้อ)
+    ถือเป็น tier เดียว"""
+    if row_values(row_line):
+        return [("single", 0.0, None, "บรรทัดเดียว (ไม่มี tier วงเงิน)", row_line)]
+    tiers: list[tuple] = []
+    for i in range(tier_start, end):
+        s = lines[i]
+        if not (kw_in_line("วงเงิน", s) or kw_in_line("ยอดเงินฝาก", s)):
+            break
+        info = _maxscan.classify_tier_ext(s)
+        if info and row_values(s):
+            kind, lo, hi, desc = info
+            tiers.append((kind, lo, hi, desc, s))
+    return tiers
+
+
+def _value_of(tier: tuple, col: int) -> str | None:
+    """callback ของ _maxscan.select() — ดึงค่าดิบที่คอลัมน์ col จากบรรทัดดิบของ tier นั้น"""
+    vals = row_values(tier[4])
+    if len(vals) != EXPECTED_COLUMNS:
+        return None
+    return vals[col - 1]
+
+
+def _extract_lines(pdf_bytes: bytes) -> list[str] | None:
+    """ถอดข้อความทุกหน้าเป็น list ของบรรทัด (ตัดบรรทัดว่าง/หัวตาราง 'ประเภทลูกค้า' ทิ้ง)
+    ใช้ร่วมกันทั้ง extract_rates() และ debug_tiers() — คืน None ถ้าอ่าน PDF ไม่ได้เลย"""
     lines: list[str] = []
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -183,7 +253,20 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
                         continue
                     lines.append(s)
     except Exception as e:
-        log.error(f"scb.extract_rates: อ่าน PDF ล้มเหลว: {e}")
+        log.error(f"scb: อ่าน PDF ล้มเหลว: {e}")
+        return None
+    return lines
+
+
+def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
+    """อ่านค่าอัตราดอกเบี้ยตาม rate_targets (แต่ละตัวกำหนด section/row/depositor เอง)
+    target ปกติ (ไม่ระบุ mode หรือ mode='cell') ใช้ path เดิม (amount_m เลือก tier เดียว) — ไม่แตะ
+    target ที่ระบุ mode='max_tier'/'top_tier'/'max_all' ("อัตราสูงสุด" ①②③ — ดู CLAUDE.md) ใช้
+    _collect_max_tiers() + _maxscan.select() แทน คนละ code path กับโหมด cell เดิมโดยสิ้นเชิง"""
+    rate_targets = bank["rate_targets"]
+
+    lines = _extract_lines(pdf_bytes)
+    if lines is None:
         return None
 
     result: dict = {}
@@ -193,6 +276,7 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
 
     for target in rate_targets:
         key = target["key"]
+        mode = target.get("mode", "cell")
         section_kw = target.get("section_keyword") or DEFAULT_SECTION_KEYWORD
         tenor = target.get("tenor_months")
         row_kw = target.get("row_keyword") or (f"{tenor} เดือน" if tenor else None)
@@ -200,31 +284,56 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
             log.error(f"extract_rates [{key}]: ไม่มี row_keyword และไม่มี tenor_months — ข้าม target นี้")
             failed.append(key); continue
 
-        depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
-        col = resolve_depositor(depositor_value)
-        if col is None:
-            log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
-            failed.append(key); continue
+        if mode == "cell":
+            depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
+            col = resolve_depositor(depositor_value)
+            if col is None:
+                log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
+                failed.append(key); continue
 
-        line, desc = _find_row_line(lines, section_kw, row_kw, target.get("amount_m"))
-        if line is None:
-            log.error(f"extract_rates [{key}]: ไม่พบแถวที่ตรง section='{section_kw}' row='{row_kw}' — ข้าม target นี้")
-            failed.append(key); continue
+            line, desc = _find_row_line(lines, section_kw, row_kw, target.get("amount_m"))
+            if line is None:
+                log.error(f"extract_rates [{key}]: ไม่พบแถวที่ตรง section='{section_kw}' row='{row_kw}' — ข้าม target นี้")
+                failed.append(key); continue
 
-        vals = row_values(line)
-        if len(vals) != EXPECTED_COLUMNS:
-            log.error(f"extract_rates [{key}]: บรรทัดมี {len(vals)} คอลัมน์ (คาดว่า {EXPECTED_COLUMNS}) "
-                      f"— ถอดข้อมูลไม่น่าเชื่อถือ ข้าม target นี้กันอ่านผิดคอลัมน์: {line}")
-            failed.append(key); continue
+            vals = row_values(line)
+            if len(vals) != EXPECTED_COLUMNS:
+                log.error(f"extract_rates [{key}]: บรรทัดมี {len(vals)} คอลัมน์ (คาดว่า {EXPECTED_COLUMNS}) "
+                          f"— ถอดข้อมูลไม่น่าเชื่อถือ ข้าม target นี้กันอ่านผิดคอลัมน์: {line}")
+                failed.append(key); continue
 
-        raw_v = vals[col - 1]
-        if raw_v == "-":
-            log.error(f"extract_rates [{key}]: ไม่มีอัตราสำหรับคอลัมน์ {col} (แสดง '-') — ข้าม target นี้: {line}")
-            failed.append(key); continue
-        try:
-            rate = float(raw_v)
-        except ValueError:
-            log.error(f"extract_rates [{key}]: ค่าไม่ใช่ตัวเลข: {raw_v!r} — ข้าม target นี้")
+            raw_v = vals[col - 1]
+            if raw_v == "-":
+                log.error(f"extract_rates [{key}]: ไม่มีอัตราสำหรับคอลัมน์ {col} (แสดง '-') — ข้าม target นี้: {line}")
+                failed.append(key); continue
+            try:
+                rate = float(raw_v)
+            except ValueError:
+                log.error(f"extract_rates [{key}]: ค่าไม่ใช่ตัวเลข: {raw_v!r} — ข้าม target นี้")
+                failed.append(key); continue
+
+        elif mode in _maxscan.MODES:
+            row_line, tier_start, end = _find_row_range(lines, section_kw, row_kw)
+            if row_line is None:
+                log.error(f"extract_rates [{key}]: ไม่พบแถวที่ตรง section='{section_kw}' row='{row_kw}' — ข้าม target นี้")
+                failed.append(key); continue
+
+            col = None
+            if mode != "max_all":
+                depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
+                col = resolve_depositor(depositor_value)
+                if col is None:
+                    log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
+                    failed.append(key); continue
+
+            tiers = _collect_max_tiers(row_line, lines, tier_start, end)
+            rate, desc = _maxscan.select(mode, tiers, col, DEPOSITOR_COLUMNS, _value_of)
+            if rate is None:
+                log.error(f"extract_rates [{key}]: {desc} — ข้าม target นี้")
+                failed.append(key); continue
+
+        else:
+            log.error(f"extract_rates [{key}]: ไม่รู้จัก mode '{mode}' — ข้าม target นี้")
             failed.append(key); continue
 
         result[key] = rate
@@ -240,6 +349,68 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
 
     result["tiers_used"] = tiers_used
     return result
+
+
+def debug_tiers(pdf_bytes: bytes, bank: dict) -> list[dict] | None:
+    """ใช้กับ CLI `--show-tiers SCB` — คืนต่อ target: tier ที่เก็บได้ (คำอธิบาย + ค่าทุกคอลัมน์)
+    พร้อมผลลัพธ์ทั้ง 4 โหมด (cell เดิม ตาม amount_m, max_tier①, top_tier②, max_all③) โดยไม่สนใจว่า
+    target นั้นตั้ง mode อะไรไว้จริง — เป็นเครื่องมือตรวจตาก่อนติ๊กใช้งานจริงในหน้า /config"""
+    lines = _extract_lines(pdf_bytes)
+    if lines is None:
+        return None
+
+    report: list[dict] = []
+    for target in bank["rate_targets"]:
+        key = target["key"]
+        section_kw = target.get("section_keyword") or DEFAULT_SECTION_KEYWORD
+        tenor = target.get("tenor_months")
+        row_kw = target.get("row_keyword") or (f"{tenor} เดือน" if tenor else None)
+        depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
+        col = resolve_depositor(depositor_value)
+
+        item: dict = {"key": key, "label": target.get("label", key), "depositor": depositor_value}
+        if not row_kw or col is None:
+            item["row_found"] = "ตั้งค่า row_keyword/tenor_months หรือ depositor ไม่ถูกต้อง"
+            item["results"] = {}
+            item["tiers"] = []
+            report.append(item)
+            continue
+
+        row_line, tier_start, end = _find_row_range(lines, section_kw, row_kw)
+        if row_line is None:
+            item["row_found"] = None
+            item["results"] = {}
+            item["tiers"] = []
+            report.append(item)
+            continue
+        item["row_found"] = row_line
+
+        tiers = _collect_max_tiers(row_line, lines, tier_start, end)
+
+        results: dict = {}
+        cell_line, cell_desc = _find_row_line(lines, section_kw, row_kw, target.get("amount_m"))
+        if cell_line is not None:
+            vals = row_values(cell_line)
+            if len(vals) == EXPECTED_COLUMNS and vals[col - 1] != "-":
+                try:
+                    results["cell"] = (float(vals[col - 1]), cell_desc)
+                except ValueError:
+                    pass
+        for mode in _maxscan.MODES:
+            m_col = None if mode == "max_all" else col
+            rate, desc = _maxscan.select(mode, tiers, m_col, DEPOSITOR_COLUMNS, _value_of)
+            if rate is not None:
+                results[mode] = (rate, desc)
+        item["results"] = results
+
+        item["tiers"] = [
+            {"desc": t[3],
+             "col_values": {DEPOSITOR_COLUMNS[c][0]: (_value_of(t, c) or "-") for c in DEPOSITOR_COLUMNS}}
+            for t in tiers
+        ]
+        report.append(item)
+
+    return report
 
 
 # ─────────────────────────── Full-year discovery (manual, ละเอียด) ───────────────────────────

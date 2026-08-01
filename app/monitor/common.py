@@ -18,7 +18,7 @@ CSV read/write, settings.json, result JSON (per-bank) และการส่�
                  settings.json คีย์ email_provider ("gmail" ค่าเริ่มต้น | "mailplus")
 """
 
-import subprocess, io, re, csv, os, json, logging, logging.handlers, smtplib, ssl
+import subprocess, io, re, csv, os, json, logging, logging.handlers, smtplib, ssl, html
 import contextlib, contextvars, hashlib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -628,27 +628,31 @@ def _fmt_rate(val, prev_val) -> tuple[str, str, str]:
 def build_new_rates_email(bank: dict, eff_date: str, prev_date: str | None,
                           rates: dict, prev_rates: dict | None, warnings: list[str],
                           pdf_fname: str) -> tuple[str, str]:
+    # ค่าที่ยัดลง HTML ส่วนใหญ่มาจาก banks_config.json (bank['name']/t['label']) ซึ่งแก้ได้จากหน้า /config
+    # (admin เท่านั้น) แต่ escape ไว้เป็น defense-in-depth เผื่อมีตัวอักษรพิเศษหลุดเข้ามา — ไม่ต้องเชื่อ
+    # ว่า config สะอาดเสมอ
+    esc = html.escape
     subject = f"[{bank['code']}] อัตราดอกเบี้ยเงินฝากประจำ มีผลตั้งแต่ {eff_date}"
     rows_html = ""
     for t in bank["rate_targets"]:
         k = t["key"]
         new_s, old_s, chg_s = _fmt_rate(rates.get(k), prev_rates.get(k) if prev_rates else None)
-        rows_html += (f"<tr><td>{t['label']}</td>"
-                      f"<td align='right'>{new_s}</td>"
-                      f"<td align='right'>{old_s}</td>"
-                      f"<td align='right'>{chg_s}</td></tr>\n")
+        rows_html += (f"<tr><td>{esc(t['label'])}</td>"
+                      f"<td align='right'>{esc(new_s)}</td>"
+                      f"<td align='right'>{esc(old_s)}</td>"
+                      f"<td align='right'>{esc(chg_s)}</td></tr>\n")
 
     warn_html = ""
     if warnings:
         # warnings รวม 2 ประเภท: เปลี่ยนแปลงเกิน threshold (check_warnings) และ target ที่อ่านค่าไม่ได้
         # (run_bank ส่วน 7) — หัวข้อจึงต้องเป็นกลาง ไม่เจาะจงแค่ "เปลี่ยนแปลงผิดปกติ" เหมือนเดิม
-        items = "".join(f"<li>{w}</li>" for w in warnings)
+        items = "".join(f"<li>{esc(w)}</li>" for w in warnings)
         warn_html = (f"<p>⚠️ <strong>ข้อควรระวัง</strong><br>"
                      f"กรุณาตรวจสอบข้อมูลจาก PDF ต้นฉบับก่อนใช้งาน<ul>{items}</ul></p>")
 
-    html = f"""
-<p>{bank['name']} ({bank['code']}) ประกาศอัตราดอกเบี้ยใหม่ มีผลตั้งแต่ <strong>{eff_date}</strong><br>
-(เปลี่ยนจากประกาศ {prev_date or '-'})</p>
+    html_body = f"""
+<p>{esc(bank['name'])} ({esc(bank['code'])}) ประกาศอัตราดอกเบี้ยใหม่ มีผลตั้งแต่ <strong>{esc(eff_date)}</strong><br>
+(เปลี่ยนจากประกาศ {esc(prev_date) if prev_date else '-'})</p>
 
 <table border="1" cellpadding="6" cellspacing="0"
        style="border-collapse:collapse;font-family:monospace;font-size:14px">
@@ -659,40 +663,44 @@ def build_new_rates_email(bank: dict, eff_date: str, prev_date: str | None,
 </table>
 {warn_html}
 <hr>
-<p style="font-size:12px;color:#888">📎 PDF: {pdf_fname}<br>
-📊 ประวัติ: {bank['code'].lower()}_deposit_rate.csv</p>"""
-    return subject, html
+<p style="font-size:12px;color:#888">📎 PDF: {esc(pdf_fname)}<br>
+📊 ประวัติ: {esc(bank['code'].lower())}_deposit_rate.csv</p>"""
+    return subject, html_body
 
 
 def build_error_email(bank: dict, step: str, message: str, ts: str) -> tuple[str, str]:
+    # message มักมาจาก str(exception) โดยตรง — ไม่ใช่ข้อความที่เขียนเองในโค้ดเสมอไป (เช่น pdfplumber
+    # โยน exception ที่มีเนื้อหาจาก PDF ปนอยู่ได้) escape ให้หมดกันหลุดเป็น HTML/script จริง
+    esc = html.escape
     subject = f"[{bank['code']} ERROR] ระบบติดตามอัตราดอกเบี้ยเกิดข้อผิดพลาด {ts[:10]}"
-    html = f"""
-<p>❌ <strong>พบข้อผิดพลาด — {bank['name']} ({bank['code']})</strong></p>
+    html_body = f"""
+<p>❌ <strong>พบข้อผิดพลาด — {esc(bank['name'])} ({esc(bank['code'])})</strong></p>
 <table cellpadding="6">
-  <tr><td><strong>วันที่รัน</strong></td><td>{ts}</td></tr>
-  <tr><td><strong>ขั้นตอนที่ล้มเหลว</strong></td><td>{step}</td></tr>
-  <tr><td><strong>รายละเอียด</strong></td><td>{message}</td></tr>
+  <tr><td><strong>วันที่รัน</strong></td><td>{esc(ts)}</td></tr>
+  <tr><td><strong>ขั้นตอนที่ล้มเหลว</strong></td><td>{esc(step)}</td></tr>
+  <tr><td><strong>รายละเอียด</strong></td><td>{esc(message)}</td></tr>
 </table>
-<p style="font-size:12px;color:#888">Log: {LOG_PATH}</p>"""
-    return subject, html
+<p style="font-size:12px;color:#888">Log: {esc(LOG_PATH)}</p>"""
+    return subject, html_body
 
 
 def build_test_email() -> tuple[str, str]:
     """อีเมลทดสอบ — ใช้ verify ค่า SMTP ผ่านปุ่มบนหน้าเว็บ / CLI --test-email
     แสดง provider ที่กำลังเลือกใช้งานจริง (Gmail หรือ MailPlus) ไม่ใช่แค่ SMTP_* เสมอ"""
+    esc = html.escape
     cfg = _active_smtp_config()
     ts = datetime.now().isoformat(timespec="seconds")
     provider_name = "MailPlus (Synology)" if cfg["provider"] == "mailplus" else "Gmail"
     recipients = ", ".join(get_recipients()) or "-"
     subject = f"[TEST] ทดสอบระบบส่งอีเมล CheckRate {ts[:10]}"
-    html = f"""
+    html_body = f"""
 <p>✅ <strong>ทดสอบส่งอีเมลสำเร็จ</strong> — ระบบ CheckRate เชื่อมต่อ SMTP ได้เรียบร้อย</p>
 <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px">
-  <tr><td><strong>เวลา</strong></td><td>{ts}</td></tr>
-  <tr><td><strong>Provider</strong></td><td>{provider_name}</td></tr>
-  <tr><td><strong>SMTP host</strong></td><td>{cfg['host'] or '-'}:{cfg['port']}</td></tr>
-  <tr><td><strong>ผู้ส่ง</strong></td><td>{cfg['user'] or '-'}</td></tr>
-  <tr><td><strong>ผู้รับ</strong></td><td>{recipients}</td></tr>
+  <tr><td><strong>เวลา</strong></td><td>{esc(ts)}</td></tr>
+  <tr><td><strong>Provider</strong></td><td>{esc(provider_name)}</td></tr>
+  <tr><td><strong>SMTP host</strong></td><td>{esc(cfg['host'] or '-')}:{esc(str(cfg['port']))}</td></tr>
+  <tr><td><strong>ผู้ส่ง</strong></td><td>{esc(cfg['user'] or '-')}</td></tr>
+  <tr><td><strong>ผู้รับ</strong></td><td>{esc(recipients)}</td></tr>
 </table>
 <p style="font-size:12px;color:#888">อีเมลนี้ส่งจากปุ่ม "ทดสอบส่งอีเมล" หรือคำสั่ง <code>--test-email</code></p>"""
-    return subject, html
+    return subject, html_body

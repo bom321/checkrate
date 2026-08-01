@@ -109,6 +109,7 @@ CheckRate/
 | `SESSION_SECRET` | secret สำหรับเซ็น session cookie — เว้นว่างได้ ระบบ generate เก็บที่ `{DATA_DIR}/.session_secret` ให้เอง (ตั้งเองถ้ารันหลาย container ที่ต้องแชร์ session) |
 | `REQUEST_MAX_PER_HOUR` | จำนวนคำขอสาธารณะ (`POST /api/request`) สูงสุดต่อ IP ต่อชั่วโมง (ค่าเริ่มต้น `5`) |
 | `TRUST_PROXY` | ตั้ง `1` เมื่ออยู่หลัง reverse proxy เพื่ออ่าน `X-Forwarded-For` (ไม่งั้น rate-limit คำขอเหมารวมทั้งเว็บ) |
+| `TRUSTED_PROXY_HOPS` | จำนวน proxy ที่เชื่อถือได้ระหว่างเรากับอินเทอร์เน็ต (ค่าเริ่มต้น `1`) — ใช้ตัดสินว่าจะอ่าน `X-Forwarded-For` ตำแหน่งไหน (นับจากขวา) กัน client ปลอมค่าซ้ายสุดของ header เอง |
 | `HOST_DATA_DIR` | path บน NAS ที่ map เข้า `/data` ในคอนเทนเนอร์ |
 | `TZ` | timezone (ค่าเริ่มต้น `Asia/Bangkok`) |
 

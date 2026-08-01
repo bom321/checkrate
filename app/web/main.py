@@ -547,6 +547,7 @@ async def api_upload_pdf(code: str,
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 REQUEST_MAX_PER_HOUR = int(os.environ.get("REQUEST_MAX_PER_HOUR", "5") or "5")
 _TRUST_PROXY = os.environ.get("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes")
+TRUSTED_PROXY_HOPS = int(os.environ.get("TRUSTED_PROXY_HOPS", "1") or "1")
 
 _req_rl_lock = threading.Lock()
 _req_rl: dict[str, list[float]] = {}   # ip → timestamps ภายใน 1 ชม.
@@ -554,11 +555,21 @@ _req_rl: dict[str, list[float]] = {}   # ip → timestamps ภายใน 1 ช
 
 def _client_ip(request: Request) -> str:
     """IP ผู้เรียก — หลัง reverse proxy/Docker ต้องตั้ง env TRUST_PROXY เพื่ออ่าน X-Forwarded-For
-    (ไม่งั้นทุกคำขอจะเห็นเป็น IP ของ proxy ตัวเดียว rate limit จะเหมารวมทั้งเว็บ)"""
+    (ไม่งั้นทุกคำขอจะเห็นเป็น IP ของ proxy ตัวเดียว rate limit จะเหมารวมทั้งเว็บ)
+
+    เดิมอ่านตัวซ้ายสุดของ XFF — นั่นคือค่าที่ client ต้นทางใส่มาเอง ปลอมได้ตรง ๆ ถ้า proxy
+    ข้างหน้าไม่ล้าง header เดิมทิ้งก่อน ทำให้ rate limit ไร้ผล เปลี่ยนเป็นนับจากขวา:
+    TRUSTED_PROXY_HOPS (ค่าเริ่มต้น 1) = จำนวน proxy ที่เชื่อถือได้ระหว่างเรากับอินเทอร์เน็ต
+    (ปกติมีแค่ 1 ตัวคือ reverse proxy ของเราเอง) เลือก element ที่ตำแหน่ง -(hops) จาก XFF —
+    เป็นค่าที่ proxy ตัวที่เชื่อถือได้ตัวสุดท้ายเห็น "จริง ๆ" จาก peer ที่ต่อเข้ามา ไม่ใช่ค่าที่
+    ใครก็ใส่เองได้ ถ้ารายการสั้นกว่าที่คาด (ตั้ง hops ผิด/proxy เดิมพัง) fallback ไป
+    request.client.host — fail-closed ดีกว่าเชื่อค่าที่แก้ไขได้"""
     if _TRUST_PROXY:
         fwd = request.headers.get("x-forwarded-for", "")
         if fwd:
-            return fwd.split(",")[0].strip()
+            parts = [p.strip() for p in fwd.split(",") if p.strip()]
+            if len(parts) >= TRUSTED_PROXY_HOPS:
+                return parts[-TRUSTED_PROXY_HOPS]
     return request.client.host if request.client else "unknown"
 
 

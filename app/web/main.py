@@ -10,7 +10,7 @@ main.py — FastAPI backend สำหรับเว็บ Dashboard ติด�
   /config          จัดการ rate_targets / enabled / ลิงก์ดาวน์โหลด
   /email           ตั้งค่าผู้รับอีเมลแจ้งเตือน + ช่องทางส่ง (SMTP provider) + ทดสอบส่งอีเมล
   /logs            ดู log + ปุ่มรันตรวจสอบ
-  /api/config, /api/settings, /api/logs, /api/run, /api/run/status, /api/test-email
+  /api/config, /api/config/view, /api/settings, /api/logs, /api/run, /api/run/status, /api/test-email
 """
 
 import os, sys, re, subprocess, threading, time
@@ -732,7 +732,7 @@ def api_get_config():
     banks = da.load_banks()
     # โลโก้แยกออกมาต่างหาก ไม่ยัดใส่ dict ของ bank — ไม่งั้นตอนบันทึกจะถูกเขียนกลับลง banks_config.json
     logos = {b["code"]: _logo_url(b["code"]) for b in banks if b.get("code")}
-    return {"banks": banks, "settings": da.load_settings(), "logos": logos}
+    return {"banks": banks, "settings": da.load_settings(), "logos": logos, "view": da.load_config_view()}
 
 
 _VALID_TARGET_MODES = {"cell", "max_tier", "top_tier", "max_all"}  # ดู CLAUDE.md หัวข้อ "อัตราสูงสุด"
@@ -794,6 +794,62 @@ async def api_save_config(request: Request):
         return JSONResponse({"ok": False, "error": err}, status_code=400)
     try:
         da.save_banks(banks)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return {"ok": True}
+
+
+# ลำดับ/โหมดเรียงที่ยอมรับสำหรับ config_view.json (view preference ล้วน ๆ ดู data_access.py)
+_VALID_CONFIG_VIEW_SORT_MODES = {"custom", "tenor", "amount", "name", "mode"}
+_CONFIG_VIEW_ORDER_MAX_ITEMS = 200
+_CONFIG_VIEW_ORDER_ITEM_MAX_LEN = 128
+
+
+@app.post("/api/config/view", dependencies=[Depends(auth.require_admin_api)])
+async def api_save_config_view(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "รูปแบบข้อมูลไม่ถูกต้อง"}, status_code=400)
+
+    code = payload.get("code")
+    if not isinstance(code, str) or not code:
+        return JSONResponse({"ok": False, "error": "ต้องระบุ code ของธนาคาร"}, status_code=400)
+    bank = next((b for b in da.load_banks() if str(b.get("code", "")).upper() == code.upper()), None)
+    if bank is None:
+        return JSONResponse({"ok": False, "error": f"ไม่พบธนาคาร '{code}'"}, status_code=400)
+    canon_code = bank["code"]   # เก็บลงไฟล์ด้วย code ตามที่อยู่ใน config จริง (กัน case ไม่ตรงกัน)
+
+    order = payload.get("order")
+    sort_mode = payload.get("sort_mode")
+    if order is None and sort_mode is None:
+        return JSONResponse(
+            {"ok": False, "error": "ไม่มีข้อมูลให้บันทึก (ต้องระบุ order หรือ sort_mode อย่างน้อยหนึ่งอย่าง)"},
+            status_code=400,
+        )
+
+    if order is not None:
+        if not isinstance(order, list) or not all(isinstance(k, str) for k in order):
+            return JSONResponse({"ok": False, "error": "order ต้องเป็น list ของ string"}, status_code=400)
+        if len(order) > _CONFIG_VIEW_ORDER_MAX_ITEMS or any(
+            len(k) > _CONFIG_VIEW_ORDER_ITEM_MAX_LEN for k in order
+        ):
+            return JSONResponse({"ok": False, "error": "order มีขนาดใหญ่เกินกำหนด"}, status_code=400)
+        # กรองเหลือเฉพาะ key ที่มีอยู่จริงใน rate_targets ของธนาคารนั้น + ตัดตัวซ้ำ (กันไฟล์บวม/ขยะสะสม)
+        valid_keys = {t.get("key") for t in bank.get("rate_targets", [])}
+        seen = set()
+        filtered_order = []
+        for k in order:
+            if k in valid_keys and k not in seen:
+                seen.add(k)
+                filtered_order.append(k)
+        order = filtered_order
+
+    if sort_mode is not None and sort_mode not in _VALID_CONFIG_VIEW_SORT_MODES:
+        return JSONResponse({"ok": False, "error": f"sort_mode '{sort_mode}' ไม่รู้จัก"}, status_code=400)
+
+    try:
+        da.save_config_view_for_bank(canon_code, order, sort_mode)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return {"ok": True}

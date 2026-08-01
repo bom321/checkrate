@@ -367,15 +367,15 @@ select:disabled { background-image: none; cursor: not-allowed; }
   cursor: pointer; padding: 4px; border-radius: 6px; line-height: 1;
 }
 .cfg-t-del:hover { background: var(--down-soft); }
-.cfg-t-summary { padding: 2px 0 0 30px; font-size: 11.5px; color: var(--muted-soft); }
+.cfg-t-summary { padding: 2px 0 0 72px; font-size: 11.5px; color: var(--muted-soft); }
 .cfg-t-card.open .cfg-t-summary { display: none; }
 .cfg-t-card:not(.open) .cfg-t-body, .cfg-t-card:not(.open) .cfg-t-hint { display: none; }
 /* "ระยะ (เดือน)"/"วงเงิน (ล้าน)" เป็น px ตายตัว (พอดีตัวเลข 3-4 หลัก + ป้ายชื่อ) ไม่ใช่ fr —
    ทั้งสองช่องรับแค่ตัวเลขสั้น ๆ กว้างเท่าช่องข้อความจึงดูโหว่ · margin ซ้าย/ขวาดันให้แถวฟิลด์เริ่ม
-   ตรงกับช่องชื่อและจบก่อนปุ่ม ✕ ด้านบน (ความกว้างรวมพอ ๆ กับแถวหัวการ์ด ไม่ล้นออกไปกว้างกว่า) */
+   ตรงกับที่จับลากและจบก่อนปุ่ม ▲▼ (ความกว้างรวมพอ ๆ กับแถวหัวการ์ด ไม่ล้นออกไปกว้างกว่า) */
 .cfg-t-body {
   display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 78px 88px; gap: 10px;
-  margin: 11px 33px 0 29px;
+  margin: 11px 93px 0 72px;
 }
 .cfg-t-cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 /* ป้ายชื่อช่องไล่ระดับตามความสำคัญ: ปกติอ่อน · "ประเภทอัตรา" (.mode) เข้มกว่าเพราะกำหนดพฤติกรรมทั้งแถว ·
@@ -395,7 +395,7 @@ select:disabled { background-image: none; cursor: not-allowed; }
   background-color: #F4F1EB; color: var(--muted-soft); cursor: not-allowed;
 }
 .cfg-t-hint {
-  margin: 9px 33px 0 29px; font-size: 11px; color: #9B8A4E; background: #FBF6E8;
+  margin: 9px 93px 0 72px; font-size: 11px; color: #9B8A4E; background: #FBF6E8;
   border: 1px solid #F0E6C8; border-radius: 8px; padding: 7px 11px; line-height: 1.5;
 }
 .cfg-t-empty { padding: 14px; font-size: 12.5px; color: var(--muted-soft); text-align: center; }
@@ -406,6 +406,50 @@ select:disabled { background-image: none; cursor: not-allowed; }
   padding: 12px 16px; font-size: 11px; color: #7A7D83; line-height: 1.6;
 }
 .cfg-mode-legend b { color: #5C5F65; }
+
+/* ──────────────── จัดลำดับการแสดงผล ──────────────── */
+.cfg-targets-tools {
+  display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap;
+}
+.cfg-sort {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted);
+}
+.cfg-sort-sel {
+  width: auto; height: 30px; font-size: 11.5px; padding: 4px 26px 4px 9px;
+  border: 1px solid #E4E1DA; border-radius: 8px; background-color: var(--card);
+  color: #3C3F45; cursor: pointer; -webkit-appearance: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M1 3l4 4 4-4' fill='none' stroke='%237A7D83' stroke-width='1.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+.cfg-order-reset {
+  border: 1px solid var(--line); background: var(--card); color: #6E7178;
+  font: 500 11.5px var(--sans); padding: 7px 12px; border-radius: 8px; cursor: pointer;
+}
+.cfg-order-reset:hover { background: var(--surface); }
+
+.cfg-t-grip {
+  flex: none; display: flex; align-items: center; gap: 7px; cursor: grab;
+  user-select: none; font-size: 13px; line-height: 1; color: #CFCBC2; letter-spacing: -1px;
+}
+.cfg-t-grip:active { cursor: grabbing; }
+.cfg-t-ord {
+  font: 600 10.5px var(--mono); color: var(--muted-soft);
+  min-width: 13px; text-align: right; letter-spacing: 0;
+}
+
+.cfg-t-move {
+  flex: none; display: flex; align-items: center; gap: 2px;
+}
+.cfg-t-up, .cfg-t-down {
+  border: 1px solid #EDEAE3; background: var(--card); border-radius: 7px;
+  width: 24px; height: 24px; line-height: 1; font-size: 10px; cursor: pointer;
+  color: var(--muted); padding: 0;
+}
+.cfg-t-up:disabled, .cfg-t-down:disabled { color: #DEDBD4; cursor: default; }
+.cfg-t-up:not(:disabled):hover, .cfg-t-down:not(:disabled):hover { background: var(--surface); }
+
+.cfg-t-card.dragging { opacity: .45; }
+.cfg-t-card.dragover { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 
 
 /* ══════════════ Log & รันตรวจสอบ (mockup 6a) ══════════════ */
@@ -957,11 +1001,20 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .cfg-strip-item.wide { flex-basis: 100%; }
   .cfg-urls { grid-template-columns: 1fr; padding: 14px 16px; }
   .cfg-bank-head, .cfg-targets-head, .targets-list { padding-left: 16px; padding-right: 16px; }
-  /* จอแคบ: ยกเลิก margin ที่ใช้จัดแถวฟิลด์ให้ตรงกับหัวการ์ด (คอลัมน์เดียวแล้ว ไม่ต้องเผื่อปุ่ม ✕) */
+  /* จอแคบ: ยกเลิก margin ที่ใช้จัดแถวฟิลด์ให้ตรงกับหัวการ์ด (คอลัมน์เดียวแล้ว ไม่ต้องเผื่อที่จับลาก/ปุ่ม ▲▼) */
   .cfg-t-body { grid-template-columns: 1fr; margin-left: 0; margin-right: 0; }
+  .cfg-t-summary { padding-left: 0; }
   .cfg-t-hint { margin-left: 0; margin-right: 0; }
   .cfg-t-body input.num { text-align: left; }
   .cfg-t-name { min-width: 40px; }
+
+  /* เครื่องมือจัดลำดับบนจอแคบ: ช่องเรียงลำดับกินเต็มแถวของตัวเอง ปุ่มคืนลำดับ/เพิ่มอัตราต่อท้าย
+     ซ่อนเฉพาะ "ที่จับลาก" เพราะ HTML5 drag-and-drop ใช้กับการสัมผัสไม่ได้อยู่แล้ว —
+     **ปุ่ม ▲▼ ต้องคงไว้** ไม่งั้นจัดลำดับเองบนมือถือไม่ได้เลย (เหลือแค่ dropdown เรียงอัตโนมัติ) */
+  .cfg-targets-tools { flex-wrap: wrap; }
+  .cfg-sort { flex: 1 1 100%; }
+  .cfg-sort-sel { flex: 1; width: auto; }
+  .cfg-t-grip { display: none; }
 
   /* Log (6c): ปุ่มเรียงเต็มแถว · ตัวกรองเลื่อนแนวนอน · log เป็นการ์ดต่อบรรทัด */
   .lg-actions .btn { flex: 1 1 100%; }

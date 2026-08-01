@@ -296,6 +296,52 @@ def count_new_requests() -> int:
     return sum(1 for r in load_requests() if r.get("status") == "new")
 
 
+# ────────────────── ลำดับแสดงผลหน้า /config (config_view.json) ──────────────────
+# เก็บแค่ "ลำดับการแสดงผล" ของรายการอัตราในหน้า /config ต่อธนาคาร — เป็น view preference
+# ล้วน ๆ ไม่ใช่ config จริง และ **ไม่กระทบ rate_targets ใน banks_config.json เลย** monitor ไม่เคย
+# อ่านไฟล์นี้ จึงไม่ผิดหลักแยก monitor/web (ดู CLAUDE.md) — เป็น state ของฝั่งเว็บล้วน เหมือน requests.json
+CONFIG_VIEW_PATH = os.path.join(DATA_DIR, "config_view.json")
+
+_config_view_lock = threading.Lock()   # กันบันทึกชนกันจากหลายแท็บ/แอดมิน (โปรเซสเดียว ไม่มี --workers)
+
+
+def load_config_view() -> dict:
+    """คืน {"target_order": {code: [key,...]}, "sort_mode": {code: mode}} เสมอ
+    ทนไฟล์หาย/JSON พัง/รูปแบบผิด → คืน dict ว่างที่มีสองคีย์นั้น"""
+    default = {"target_order": {}, "sort_mode": {}}
+    try:
+        with open(CONFIG_VIEW_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+    except Exception:
+        return default
+    if not isinstance(data, dict):
+        return default
+    order = data.get("target_order")
+    sort_mode = data.get("sort_mode")
+    return {
+        "target_order": order if isinstance(order, dict) else {},
+        "sort_mode": sort_mode if isinstance(sort_mode, dict) else {},
+    }
+
+
+def save_config_view_for_bank(code: str, order: list[str] | None, sort_mode: str | None) -> None:
+    """merge ค่าของธนาคารเดียวเข้ากับของเดิม (ธนาคารอื่นไม่ถูกแตะ) แล้วเขียน config_view.json
+    แบบ atomic (temp → replace) เหมือน save_banks()/_save_requests() — พารามิเตอร์ที่เป็น None = ไม่แก้ส่วนนั้น"""
+    with _config_view_lock:
+        data = load_config_view()
+        if order is not None:
+            data["target_order"][code] = order
+        if sort_mode is not None:
+            data["sort_mode"][code] = sort_mode
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = CONFIG_VIEW_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CONFIG_VIEW_PATH)
+
+
 # ─────────────────────────── Log tail ───────────────────────────
 def _parse_log_line(line: str) -> dict:
     """แยก 'YYYY-MM-DD HH:MM:SS | LEVEL | message' → dict. ทน format แปลก"""

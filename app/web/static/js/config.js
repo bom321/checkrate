@@ -1,9 +1,22 @@
 // config.js — จัดการ banks_config.json (rate_targets/enabled/ลิงก์) ผ่านหน้าเว็บ
 
 (function () {
-  let state = { banks: [], settings: {}, logos: {} };
+  let state = { banks: [], settings: {}, logos: {}, view: {} };
   const openBanks = new Set();     // index ของธนาคารที่กางอยู่ — ต้องอยู่รอดข้าม render()
-  const openTargets = new Set();   // `${bIdx}:${tIdx}` ของรายการอัตราที่กางอยู่ — เช่นกัน
+  const openTargets = new Set();   // `${bIdx}:${tIdx}` ของรายการอัตราที่กางอยู่ — เช่นกัน (คีย์ผูกกับ
+  // canonical index เสมอ — ไม่ขยับตอนแค่จัดลำดับการแสดงผล ต้องล้างเฉพาะตอน canonical index จริง ๆ
+  // เลื่อน เช่น ลบรายการ)
+
+  // ลำดับ/โหมดเรียงการแสดงผลต่อธนาคาร (แยกจาก rate_targets โดยเจตนา — เป็น "มุมมอง" ล้วน ๆ ไม่กระทบ
+  // ลำดับคอลัมน์ CSV/เส้นกราฟ) คีย์ด้วย b.code จำข้ามเซสชันผ่าน GET/POST /api/config(/view)
+  // viewOrder: code -> string[] ลำดับ "key" ที่จำไว้ (ไม่ใช่ index — index ขยับได้เวลาลบ/เพิ่มรายการ
+  // แต่ key คงที่ จึง reconcile เองได้เสมอผ่าน displayOrder() โดยไม่ต้องคอยเคลียร์ทิ้งตอน index เลื่อน)
+  const viewOrder = new Map();
+  // viewSort: code -> 'custom'|'tenor'|'amount'|'name'|'mode' — โหมด custom แปลว่า "ใช้ viewOrder ตรง ๆ
+  // ไม่จัดใหม่" ส่วนโหมดอื่นคำนวณลำดับสดจาก comparator แล้ว materialize ทับ viewOrder ทันทีที่เลือก
+  const viewSort = new Map();
+  // debounce ยิง POST /api/config/view ต่อธนาคาร (~400ms) กันยิงรัวตอนลากหรือกด ▲▼ ถี่ ๆ
+  const viewSaveTimers = new Map();
 
   const container = document.getElementById('banks-container');
   const msgEl = document.getElementById('msg');
@@ -75,6 +88,114 @@
     return badges.length ? `<span class="cfg-t-badges">${badges.join('')}</span>` : '';
   }
 
+  // ป้ายที่โชว์ใน dropdown เรียงลำดับ — ต้องเรียงตามลำดับนี้เป๊ะ (ตรงกับ <option> ในดีไซน์)
+  const SORT_LABELS = {
+    custom: 'กำหนดเอง (ลากจัดลำดับ)',
+    tenor: 'ระยะฝาก สั้น → ยาว',
+    amount: 'วงเงิน น้อย → มาก',
+    name: 'ชื่อ ก → ฮ',
+    mode: 'ประเภทอัตรา',
+  };
+
+  // ค่าว่าง/null ตกไปท้ายเสมอไม่ว่าจะเรียงทิศไหน — ถอดมาจาก design ตรง ๆ ห้ามคิดเกณฑ์เอง
+  function num(v) {
+    return (v === '' || v === null || v === undefined) ? Infinity : parseFloat(v);
+  }
+  const MODE_RANK = { cell: 0, max_tier: 1, top_tier: 2, max_all: 3 };
+  function modeOf(t) { return t.mode && t.mode !== 'cell' ? t.mode : 'cell'; }
+  // comparator ต่อโหมดเรียง (ไม่มี 'custom' — โหมดนั้นไม่จัดใหม่ ใช้ viewOrder ที่จำไว้ตรง ๆ)
+  const SORT_COMPARATORS = {
+    tenor: (a, b) => (num(a.tenor_months) - num(b.tenor_months)) || (num(a.amount_m) - num(b.amount_m)),
+    amount: (a, b) => (num(a.amount_m) - num(b.amount_m)) || (num(a.tenor_months) - num(b.tenor_months)),
+    name: (a, b) => (a.alias || a.label || a.key || '').localeCompare(b.alias || b.label || b.key || '', 'th'),
+    mode: (a, b) => (MODE_RANK[modeOf(a)] - MODE_RANK[modeOf(b)]) || (num(a.tenor_months) - num(b.tenor_months)),
+  };
+
+  // คำนวณลำดับ key ใหม่ทั้งชุดตามโหมดเรียงที่เลือก (ใช้ state สดของธนาคารนี้ — เรียกหลัง readFormIntoState()
+  // เสมอ กันเรียงจากค่าเก่าที่ผู้ใช้เพิ่งแก้ในฟอร์มแต่ยังไม่ sync เข้า state)
+  function computeSortedOrder(bIdx, mode) {
+    const targets = state.banks[bIdx].rate_targets || [];
+    const cmp = SORT_COMPARATORS[mode];
+    if (!cmp) return targets.map(t => t.key);
+    const idxs = targets.map((_, i) => i);
+    // เทียบเสมอด้วย index เดิมเป็นตัวตัดสินสุดท้าย กันลำดับสลับไปมาเวลาค่าที่ใช้เทียบเท่ากันเป๊ะ
+    idxs.sort((ia, ib) => cmp(targets[ia], targets[ib]) || (ia - ib));
+    return idxs.map(i => targets[i].key);
+  }
+
+  // canonical index (0..N-1 ใน b.rate_targets) เรียงเป็น "ลำดับที่จะ render" — จับคู่ด้วย key เท่านั้น
+  // (ไม่ใช่ index) จึงทนไฟล์ view ที่จำไว้เก่า/ขาด/เกิน หรือ index ที่เลื่อนเพราะลบ/เพิ่มรายการได้เอง
+  // โดยไม่ต้อง migrate อะไร: 1) ไล่ key ตาม viewOrder ที่จำไว้ ข้าม key ที่หาไม่เจอแล้ว 2) ต่อท้ายด้วย
+  // canonical index ที่เหลือ (ยังไม่ถูกใช้) ตามลำดับเดิมใน rate_targets — คลุมทั้ง target ที่เพิ่งเพิ่ม
+  // ใหม่และ target ที่คีย์ยังว่าง ผลลัพธ์เป็น permutation ของ 0..N-1 เสมอ
+  function displayOrder(bIdx) {
+    const targets = (state.banks[bIdx] && state.banks[bIdx].rate_targets) || [];
+    const order = viewOrder.get(state.banks[bIdx].code) || [];
+    const used = new Array(targets.length).fill(false);
+    const result = [];
+    order.forEach(key => {
+      const idx = targets.findIndex((t, i) => !used[i] && t.key === key);
+      if (idx !== -1) { result.push(idx); used[idx] = true; }
+    });
+    targets.forEach((t, i) => { if (!used[i]) result.push(i); });
+    return result;
+  }
+
+  // คีย์ปัจจุบันของการ์ด — อ่านจาก input สด ไม่ใช่จาก state (ผู้ใช้อาจเพิ่งพิมพ์คีย์ใหม่แต่ยังไม่ sync)
+  function cardKey(card) {
+    const el = card.querySelector('.t-key');
+    return el ? el.value.trim() : '';
+  }
+
+  // canonical index ของ target ที่มีคีย์นี้ · -1 ถ้าไม่มีแล้ว (คีย์ว่าง = แถวที่ยังไม่ได้ตั้งค่า ถูกตัดทิ้ง)
+  // ใช้คู่กับ cardKey() เพื่ออ้างอิงการ์ดข้าม readFormIntoState() ได้อย่างปลอดภัย
+  function canonicalIdxOfKey(b, key) {
+    if (!key) return -1;
+    return (b.rate_targets || []).findIndex(t => t.key === key);
+  }
+
+  // เลือกโหมดเรียงจาก dropdown = คำนวณลำดับใหม่ทันทีแล้ว "materialize" ลงเป็น viewOrder ตรง ๆ (ไม่ใช่
+  // แค่เก็บชื่อโหมดไว้เฉย ๆ) กันเคส custom ที่ผู้ใช้ลาก/กด ▲▼ ต่อจากลำดับที่เพิ่งเรียงมา — ถ้าเลือกกลับมา
+  // เป็น custom ก็แค่ไม่จัดใหม่ (คง viewOrder เดิมที่มีอยู่ตรง ๆ)
+  function applySortMode(bIdx, mode) {
+    const b = state.banks[bIdx];
+    viewSort.set(b.code, mode);
+    if (mode !== 'custom') viewOrder.set(b.code, computeSortedOrder(bIdx, mode));
+    scheduleViewSave(b.code);
+  }
+
+  // debounce ~400ms ต่อธนาคาร — ยิงทันทีที่ลำดับ/โหมดเรียงเปลี่ยน (ลาก/▲▼/dropdown/คืนลำดับเดิม) แต่ไม่
+  // ผูกกับปุ่ม "บันทึกการตั้งค่า" (ปุ่มนั้นบันทึก banks_config.json เท่านั้น คนละ endpoint คนละความหมาย)
+  function scheduleViewSave(code) {
+    if (viewSaveTimers.has(code)) clearTimeout(viewSaveTimers.get(code));
+    viewSaveTimers.set(code, setTimeout(() => {
+      viewSaveTimers.delete(code);
+      saveViewOrder(code);
+    }, 400));
+  }
+
+  async function saveViewOrder(code) {
+    const order = viewOrder.get(code) || [];
+    const sortMode = viewSort.get(code) || 'custom';
+    try {
+      const res = await fetch('/api/config/view', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, order, sort_mode: sortMode }),
+      });
+      const data = await res.json();
+      if (!data.ok) notice('err', 'บันทึกลำดับไม่สำเร็จ: ' + (data.error || ''));
+    } catch (e) {
+      notice('err', 'บันทึกลำดับไม่สำเร็จ: เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+    }
+  }
+
+  function sortSelectHtml(code) {
+    const cur = viewSort.get(code) || 'custom';
+    const opts = Object.keys(SORT_LABELS).map(v =>
+      `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(SORT_LABELS[v])}</option>`).join('');
+    return `<select class="cfg-sort-sel">${opts}</select>`;
+  }
+
   // สรุปแถวเดียวที่โชว์ตอนพับ — ใช้ค่าจาก state object ตอน render() หรือจากฟอร์มสดตอนเพิ่งพับ (updateTargetSummaryFromDom)
   function targetSummary(t, mode) {
     const parts = [];
@@ -86,7 +207,7 @@
     return parts.join(' · ') || 'ยังไม่ได้ตั้งค่า';
   }
 
-  function targetCardHtml(bIdx, tIdx, t, modeDisabled) {
+  function targetCardHtml(bIdx, tIdx, t, modeDisabled, pos, total) {
     const isOpen = openTargets.has(`${bIdx}:${tIdx}`);
     const mode = t.mode && t.mode !== 'cell' ? t.mode : 'cell';
     // โหมด max ไม่ใช้ amount_m (ไม่เจาะวงเงินเดียว) — ปิดช่องกันสับสนว่าตั้งแล้วมีผล
@@ -107,6 +228,7 @@
     return `
       <div class="cfg-t-card${isOpen ? ' open' : ''}" data-bank="${bIdx}" data-target="${tIdx}">
         <div class="cfg-t-card-head">
+          <span class="cfg-t-grip" draggable="true" title="ลากเพื่อจัดลำดับ">⠿<span class="cfg-t-ord">${pos}</span></span>
           <button type="button" class="cfg-t-chevron" aria-expanded="${isOpen}" title="กาง/ยุบ">▾</button>
           <div class="cfg-t-titlewrap" title="คลิกเพื่อพับ/เปิดรายละเอียด">
             <input type="text" class="t-label cfg-t-name" value="${esc(t.alias || t.label || '')}" placeholder="ชื่อที่แสดง">
@@ -114,6 +236,10 @@
             <input type="text" class="t-key cfg-t-key" value="${esc(t.key)}" placeholder="${MODE_KEY_HINT[mode]}" ${keyEditing ? '' : 'hidden'}>
           </div>
           ${badges}
+          <span class="cfg-t-move">
+            <button type="button" class="cfg-t-up" title="เลื่อนขึ้น" ${pos <= 1 ? 'disabled' : ''}>▲</button>
+            <button type="button" class="cfg-t-down" title="เลื่อนลง" ${pos >= total ? 'disabled' : ''}>▼</button>
+          </span>
           <button type="button" class="cfg-t-del t-remove" title="ลบแถวนี้">✕</button>
         </div>
         <div class="cfg-t-summary">${esc(targetSummary(t, mode))}</div>
@@ -166,7 +292,12 @@
     const isOpen = openBanks.has(bIdx);
     const nTargets = (b.rate_targets || []).length;
     const modeDisabled = MAX_MODE_UNSUPPORTED_PARSERS.has(b.parser);
-    const targets = (b.rate_targets || []).map((t, tIdx) => targetCardHtml(bIdx, tIdx, t, modeDisabled)).join('');
+    // render ตามลำดับที่จัดไว้ (displayOrder) แต่ยังส่ง canonical index (tIdx) เข้า targetCardHtml เดิม
+    // ทุกประการ — canonical index คือ index จริงใน b.rate_targets ซึ่งคือลำดับคอลัมน์ CSV/เส้นกราฟ
+    // ห้ามสลับ ส่วน pos/total (ลำดับที่ 1-based ที่ "แสดง") ใช้แค่โชว์เลขบนกริปกับ enable/disable ▲▼
+    const order = displayOrder(bIdx);
+    const rateTargets = b.rate_targets || [];
+    const targets = order.map((tIdx, i) => targetCardHtml(bIdx, tIdx, rateTargets[tIdx], modeDisabled, i + 1, order.length)).join('');
     const accent = BANK_ACCENT[b.code] || BANK_ACCENT_DEFAULT;
     return `
     <div class="cfg-bank${b.enabled ? '' : ' off'}${isOpen ? ' open' : ''}" data-bank-idx="${bIdx}">
@@ -217,9 +348,15 @@
         <div class="cfg-targets-head">
           <div class="cfg-targets-labels">
             <span class="cfg-targets-title">อัตราที่ติดตาม</span>
-            <span class="cfg-targets-hint">${nTargets} รายการ · แต่ละรายการ = 1 เส้นกราฟ + 2 คอลัมน์ CSV</span>
+            <span class="cfg-targets-hint">${nTargets} รายการ · ลำดับที่จัดเป็นการแสดงผลในหน้านี้เท่านั้น ไม่กระทบคอลัมน์ CSV/เส้นกราฟ</span>
           </div>
-          <button type="button" class="cfg-add add-target">+ เพิ่มอัตรา</button>
+          <div class="cfg-targets-tools">
+            <label class="cfg-sort">เรียงลำดับ
+              ${sortSelectHtml(b.code)}
+            </label>
+            <button type="button" class="cfg-order-reset">คืนลำดับเดิม</button>
+            <button type="button" class="cfg-add add-target">+ เพิ่มอัตรา</button>
+          </div>
         </div>
 
         <div class="targets-list">${targets || '<div class="cfg-t-empty">ยังไม่มีอัตราที่ติดตาม — กด “+ เพิ่มอัตรา”</div>'}</div>
@@ -252,7 +389,10 @@
       b.latest_pdf_url = card.querySelector('.b-latest-url').value.trim();
       b.prev_pdf_url = card.querySelector('.b-prev-url').value.trim();
       b.referer = card.querySelector('.b-referer').value.trim();
-      const targets = [];
+      // เขียนกลับตาม canonical index (data-target) เสมอ — ไม่ใช่ลำดับ DOM ซึ่งตอนนี้คือลำดับ "แสดงผล"
+      // ที่จัดเรียงได้ (displayOrder) ลำดับใน b.rate_targets ต้องตรงกับ banks_config.json เดิมเป๊ะเพราะ
+      // เป็นลำดับคอลัมน์ CSV/เส้นกราฟ + ส่วนหนึ่งของ parse-cache signature ฝั่ง monitor ห้ามสลับ
+      const out = new Array(b.rate_targets.length);
       card.querySelectorAll('.cfg-t-card[data-target]').forEach(row => {
         const key = row.querySelector('.t-key').value.trim();
         if (!key) return;
@@ -279,9 +419,21 @@
         if (rowKw) target.row_keyword = rowKw;
         // max_all ไล่ทุกคอลัมน์ผู้ฝากเอง — ไม่เขียน depositor แม้ช่องจะมีค่าค้างจากก่อนสลับโหมด
         if (depositor && mode !== 'max_all') target.depositor = depositor;
-        targets.push(target);
+        out[Number(row.dataset.target)] = target;
       });
-      b.rate_targets = targets;
+      const before = b.rate_targets.length;
+      // คีย์ว่างถูกตัดทิ้ง (พฤติกรรมเดิม) — filter หลังเขียนตาม canonical index จึงยังคงลำดับสัมพัทธ์เดิม
+      // ของรายการที่เหลือไว้ถูกต้อง (ไม่ใช่ลำดับ DOM)
+      b.rate_targets = out.filter(t => t && t.key);
+      if (b.rate_targets.length !== before) {
+        // ตัดรายการทิ้ง = canonical index ของตัวถัดไปเลื่อนหมด — openTargets ผูกกับ canonical index
+        // (`${bIdx}:${canonicalIdx}`) จึงต้องล้างของธนาคารนี้ทิ้งกันจำผิดรายการ (เหมือน handler .t-remove)
+        // ตั้งใจ "ไม่" ล้าง viewOrder ตรงนี้ — มันจับคู่ด้วย "key" ไม่ใช่ index จึงทนต่อ index ที่เลื่อนได้
+        // อยู่แล้ว (displayOrder() ข้าม key ที่หายไปเงียบ ๆ) ถ้าล้างทิ้งทุกครั้งที่มีรายการคีย์ว่างถูกกรอง
+        // ออก จะรีเซ็ตลำดับที่ผู้ใช้เพิ่งจัดทิ้งโดยไม่จำเป็น เช่นเคส "กด + เพิ่มอัตรา แล้วยังไม่ทันใส่คีย์
+        // ก็ไปลากรายการอื่นต่อ" ซึ่งพบได้บ่อยกว่าที่คิด (readFormIntoState() ถูกเรียกก่อนทุก action จัดลำดับ)
+        [...openTargets].forEach(k => { if (k.startsWith(`${bIdx}:`)) openTargets.delete(k); });
+      }
     });
   }
 
@@ -313,6 +465,108 @@
         // (ปุ่ม "+ เพิ่มอัตรา" อยู่ด้านบนสุดของรายการ) ผู้ใช้จึงไม่เห็นว่ามีแถวใหม่เพิ่มมา
         const card = container.querySelector(`.cfg-t-card[data-bank="${bIdx}"][data-target="${newIdx}"]`);
         if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+    // เรียงลำดับ: เลือกจาก dropdown = คำนวณลำดับใหม่ทันทีแล้ว materialize ลง viewOrder (ดู applySortMode)
+    container.querySelectorAll('.cfg-sort-sel').forEach(sel => {
+      sel.addEventListener('click', e => e.stopPropagation());
+      sel.addEventListener('change', () => {
+        readFormIntoState();
+        const bIdx = Number(sel.closest('.cfg-bank').dataset.bankIdx);
+        applySortMode(bIdx, sel.value);
+        render();
+      });
+    });
+    // คืนลำดับเดิม = ลำดับ key ตาม banks_config.json (canonical) + กลับเป็นโหมด custom
+    container.querySelectorAll('.cfg-order-reset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        readFormIntoState();
+        const bIdx = Number(btn.closest('.cfg-bank').dataset.bankIdx);
+        const b = state.banks[bIdx];
+        viewOrder.set(b.code, (b.rate_targets || []).map(t => t.key));
+        viewSort.set(b.code, 'custom');
+        scheduleViewSave(b.code);
+        render();
+      });
+    });
+    // ▲▼ สลับตำแหน่งกับใบข้างเคียงใน "ลำดับที่แสดง" (ไม่ใช่ canonical) แล้วเขียนกลับเป็น viewOrder ใหม่
+    // (ดีดกลับเป็นโหมด custom เสมอเมื่อผู้ใช้จัดเอง)
+    container.querySelectorAll('.cfg-t-up, .cfg-t-down').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (btn.disabled) return;
+        const card = btn.closest('.cfg-t-card');
+        const bIdx = Number(card.dataset.bank);
+        // อ่าน "คีย์" จาก DOM ก่อนเรียก readFormIntoState() แล้วค่อยหา canonical index จากคีย์นั้นทีหลัง —
+        // readFormIntoState() ตัดแถวที่คีย์ยังว่างทิ้ง ซึ่งทำให้ canonical index ของแถวหลังจากนั้นเลื่อนหมด
+        // ถ้าจับ data-target ไว้ก่อนแล้วใช้ต่อ จะย้ายผิดใบเงียบ ๆ (เคสจริง: กด "+ เพิ่มอัตรา" ทิ้งไว้
+        // ยังไม่ใส่คีย์ แล้วไปกด ▲▼/ลากแถวอื่นต่อ) — คีย์คงที่เสมอ จึงใช้อ้างอิงข้าม readFormIntoState() ได้
+        const key = cardKey(card);
+        readFormIntoState();
+        const b = state.banks[bIdx];
+        const tIdx = canonicalIdxOfKey(b, key);
+        if (tIdx === -1) return;
+        const order = displayOrder(bIdx);
+        const pos = order.indexOf(tIdx);
+        const swapPos = pos + (btn.classList.contains('cfg-t-up') ? -1 : 1);
+        if (pos === -1 || swapPos < 0 || swapPos >= order.length) return;
+        [order[pos], order[swapPos]] = [order[swapPos], order[pos]];
+        viewOrder.set(b.code, order.map(i => b.rate_targets[i].key));
+        viewSort.set(b.code, 'custom');
+        scheduleViewSave(b.code);
+        render();
+      });
+    });
+    // ลากจัดลำดับ — draggable อยู่ที่กริป (.cfg-t-grip) ส่วน dragover/drop ฟังที่ตัวการ์ดทั้งใบ
+    container.querySelectorAll('.cfg-t-grip').forEach(grip => {
+      grip.addEventListener('click', e => e.stopPropagation());
+      grip.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
+        const card = grip.closest('.cfg-t-card');
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        // ส่ง "คีย์" ไม่ใช่ canonical index — index เลื่อนได้ตอน readFormIntoState() ตัดแถวคีย์ว่างทิ้ง
+        e.dataTransfer.setData('text/plain', cardKey(card));
+        // เก็บ index ธนาคารไว้ด้วยกันลากข้ามการ์ดธนาคารอื่น (แยกกันต่อธนาคารตามที่งานกำหนด)
+        e.dataTransfer.setData('application/x-bank-idx', card.dataset.bank);
+      });
+      grip.addEventListener('dragend', () => {
+        grip.closest('.cfg-t-card').classList.remove('dragging');
+        container.querySelectorAll('.cfg-t-card.dragover').forEach(c => c.classList.remove('dragover'));
+      });
+    });
+    container.querySelectorAll('.cfg-t-card').forEach(card => {
+      card.addEventListener('dragover', (e) => {
+        if (card.classList.contains('dragging')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        card.classList.add('dragover');
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('dragover'));
+      card.addEventListener('drop', (e) => {
+        e.preventDefault();
+        card.classList.remove('dragover');
+        const srcBankIdx = Number(e.dataTransfer.getData('application/x-bank-idx'));
+        const srcKey = e.dataTransfer.getData('text/plain');
+        const dstBankIdx = Number(card.dataset.bank);
+        const dstKey = cardKey(card);
+        // ห้ามลากข้ามธนาคาร (จัดลำดับแยกกันต่อธนาคาร) และวางที่ใบเดิมไม่ต้องทำอะไร ·
+        // แถวที่ยังไม่ได้ตั้งคีย์ย้ายไม่ได้ (readFormIntoState() ตัดทิ้งอยู่แล้ว ไม่มีอะไรให้จำลำดับ)
+        if (!srcKey || !dstKey || srcBankIdx !== dstBankIdx || srcKey === dstKey) return;
+        readFormIntoState();
+        const b = state.banks[dstBankIdx];
+        // หา canonical index จากคีย์ *หลัง* readFormIntoState() (ดูเหตุผลที่ handler ▲▼)
+        const srcTIdx = canonicalIdxOfKey(b, srcKey);
+        const dstTIdx = canonicalIdxOfKey(b, dstKey);
+        if (srcTIdx === -1 || dstTIdx === -1) return;
+        // เอาตัวที่ลากออกจากลำดับที่แสดงปัจจุบันก่อน แล้วแทรกกลับ ณ ตำแหน่งของใบเป้าหมาย
+        const order = displayOrder(dstBankIdx).filter(i => i !== srcTIdx);
+        const insertAt = order.indexOf(dstTIdx);
+        order.splice(insertAt, 0, srcTIdx);
+        viewOrder.set(b.code, order.map(i => b.rate_targets[i].key));
+        viewSort.set(b.code, 'custom');
+        scheduleViewSave(b.code);
+        render();
       });
     });
     container.querySelectorAll('.t-remove').forEach(btn => {
@@ -406,6 +660,18 @@
     state = await res.json();
     openBanks.clear();
     openTargets.clear();
+    viewOrder.clear();
+    viewSort.clear();
+    // state.view อาจไม่มี/เป็น {}/มีคีย์ไม่ครบ (เซิร์ฟเวอร์ยังไม่เคยเก็บ หรือธนาคารเพิ่งเพิ่มใหม่) —
+    // ทนได้ทุกกรณีโดย default เป็น 'custom' + ลำดับตาม canonical (เท่ากับไม่จัดใหม่เลย)
+    const view = state.view || {};
+    const orderMap = view.target_order || {};
+    const sortMap = view.sort_mode || {};
+    state.banks.forEach(b => {
+      const saved = orderMap[b.code];
+      viewOrder.set(b.code, Array.isArray(saved) ? saved.slice() : (b.rate_targets || []).map(t => t.key));
+      viewSort.set(b.code, sortMap[b.code] || 'custom');
+    });
     render();
   }
 

@@ -106,7 +106,7 @@ CheckRate/
 | `DATA_DIR` | ตำแหน่งเก็บข้อมูล (local: `./data`, Docker: `/data`) |
 | `WEB_HOST` / `WEB_PORT` | host/port ของเว็บ (ค่าเริ่มต้น `0.0.0.0` / `8080`) |
 | `ADMIN_EMAILS` | อีเมลที่มีสิทธิ์เข้า `/config`, `/email`, `/logs` และกดปุ่มรันตรวจสอบ (คั่นหลายคนด้วย `,`) — ไม่มีทางแก้จากเว็บ |
-| `SESSION_SECRET` | secret สำหรับเซ็น session cookie — เว้นว่างได้ ระบบ generate เก็บที่ `{DATA_DIR}/.session_secret` ให้เอง (ตั้งเองถ้ารันหลาย container ที่ต้องแชร์ session) |
+| `SESSION_SECRET` | secret สำหรับเซ็น session cookie — **แนะนำให้ตั้งเองเสมอ** (generate ด้วย `python3 -c "import secrets; print(secrets.token_hex(32))"`) ไม่ตั้ง ระบบ generate เก็บที่ `{DATA_DIR}/.session_secret` แทน แต่โฟลเดอร์นั้นมักเข้าถึงได้ผ่าน SMB/File Station บน NAS ก็ปลอม session เป็น admin ได้ถ้าใครอ่านไฟล์นั้นออก |
 | `REQUEST_MAX_PER_HOUR` | จำนวนคำขอสาธารณะ (`POST /api/request`) สูงสุดต่อ IP ต่อชั่วโมง (ค่าเริ่มต้น `5`) |
 | `TRUST_PROXY` | ตั้ง `1` เมื่ออยู่หลัง reverse proxy เพื่ออ่าน `X-Forwarded-For` (ไม่งั้น rate-limit คำขอเหมารวมทั้งเว็บ) |
 | `TRUSTED_PROXY_HOPS` | จำนวน proxy ที่เชื่อถือได้ระหว่างเรากับอินเทอร์เน็ต (ค่าเริ่มต้น `1`) — ใช้ตัดสินว่าจะอ่าน `X-Forwarded-For` ตำแหน่งไหน (นับจากขวา) กัน client ปลอมค่าซ้ายสุดของ header เอง |

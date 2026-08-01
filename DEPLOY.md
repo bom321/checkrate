@@ -198,4 +198,8 @@ sh /volume1/bom321/Work/deposit-rate/docker/checkrate/scripts/update.sh
 - รายชื่อผู้ดูแล (`ADMIN_EMAILS`) ตั้งใน `.env` เท่านั้น — ไม่มีทางแก้จากหน้าเว็บ (กันไม่ให้ยกระดับสิทธิ์ตัวเองผ่าน API)
   ต้องแก้ `.env` แล้ว restart container ถ้าจะเพิ่ม/ลดผู้ดูแล
 - session cookie เซ็นด้วย secret ที่ generate เก็บไว้ที่ `{HOST_DATA_DIR}/.session_secret` ให้อัตโนมัติ (คงอยู่ข้าม restart)
+  **แนะนำให้ตั้ง `SESSION_SECRET` ใน `.env` เองแทน** — `{HOST_DATA_DIR}` มักเข้าถึงได้ผ่าน SMB/File Station
+  บนบัญชี DSM อื่น ใครอ่านไฟล์ `.session_secret` ได้ก็ปลอม session cookie เป็น admin ได้ทันทีโดยไม่ต้อง
+  ผ่าน OTP เลย — ถ้าไม่ได้ตั้ง env จะมี log warning เตือนตอนคอนเทนเนอร์บูตทุกครั้ง อย่าง `HOST_DATA_DIR`
+  เองก็ไม่ควรแชร์ผ่าน SMB ให้ทุกคนเข้าถึงได้ตามหลักการเดียวกัน
   เว็บนี้ไม่มี HTTPS ในสแตกนี้ (ไม่มี reverse proxy) — ถ้าเปิดใช้งานนอก LAN ที่เชื่อถือได้ ควรเพิ่ม HTTPS/reverse proxy เอง

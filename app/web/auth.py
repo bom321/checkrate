@@ -27,10 +27,22 @@ _SESSION_SECRET_FILE = os.path.join(da.DATA_DIR, ".session_secret")
 
 
 def session_secret() -> str:
-    """ใช้ env SESSION_SECRET ถ้าตั้งไว้ ไม่งั้น generate เก็บไว้ใน DATA_DIR ให้ cookie รอดข้าม restart"""
+    """ใช้ env SESSION_SECRET ถ้าตั้งไว้ ไม่งั้น generate เก็บไว้ใน DATA_DIR ให้ cookie รอดข้าม restart
+
+    DATA_DIR มักเป็นโฟลเดอร์ที่ bind-mount เข้าถึงได้ผ่าน SMB/File Station/บัญชี DSM อื่นบน NAS —
+    ใครอ่านไฟล์ .session_secret ได้ก็ปลอม session cookie เป็น admin ได้ทันทีโดยไม่ต้องผ่าน OTP เลย
+    เตือนตอนบูตให้ผู้ดูแลรู้ตัวและย้ายไปตั้งผ่าน env แทน (ไม่ได้บังคับ — ไฟล์ยังใช้งานได้ตามเดิม
+    เพื่อไม่ให้ deploy เดิมที่ไม่ได้ตั้ง env พังกะทันหัน)"""
     env_secret = os.environ.get("SESSION_SECRET")
     if env_secret:
         return env_secret
+    common.log.warning(
+        f"SESSION_SECRET ไม่ได้ตั้งค่าผ่าน env — ใช้ไฟล์ {_SESSION_SECRET_FILE} แทน (0600) "
+        f"ไฟล์นี้อยู่ใน DATA_DIR ซึ่งมักเข้าถึงได้ผ่าน SMB/File Station บน NAS — ใครอ่านไฟล์นี้ได้ "
+        f"= ปลอม session cookie เป็น admin ได้โดยไม่ต้องผ่าน OTP เลย แนะนำให้ตั้ง env SESSION_SECRET "
+        f'เอง (generate ด้วย: python3 -c "import secrets; print(secrets.token_hex(32))") '
+        f"แล้วเก็บไว้ใน .env ที่ไม่แชร์ผ่าน SMB"
+    )
     try:
         with open(_SESSION_SECRET_FILE, "r", encoding="utf-8") as f:
             secret = f.read().strip()

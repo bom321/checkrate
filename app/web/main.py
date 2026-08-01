@@ -25,6 +25,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import data_access as da
 from . import thaidate
 from . import auth
+from ..monitor import common
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -728,6 +729,17 @@ def _validate_banks(banks) -> str | None:
         code = b.get("code")
         if not code:
             return "มีธนาคารที่ไม่มี code"
+        # latest_pdf_url/prev_pdf_url ปล่อยเป็น "" ได้ (ธนาคารที่มี resolve_latest_url hook) แต่ถ้ากรอก
+        # มาต้องเป็น http(s) เท่านั้น — เช็คซ้ำที่นี่ (นอกจาก download_pdf() เช็คตอนรันจริง) เพื่อให้ผู้ใช้
+        # เห็น error ทันทีตอนบันทึกหน้า /config ไม่ต้องรอไปเจอตอน cron รัน (กัน argument injection/SSRF
+        # เข้า curl — ดู common.validate_source_url)
+        for url_field in ("latest_pdf_url", "prev_pdf_url", "referer"):
+            url_value = b.get(url_field)
+            if url_value:
+                try:
+                    common.validate_source_url(url_value)
+                except ValueError as e:
+                    return f"[{code}] {url_field}: {e}"
         keys = []
         for t in b.get("rate_targets", []):
             k = t.get("key")

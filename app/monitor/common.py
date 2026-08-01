@@ -261,6 +261,20 @@ def apply_manual(bank_code: str, date_iso: str, rates: dict) -> tuple[dict, list
     return result, applied
 
 # ─────────────────────────── PDF Download ───────────────────────────
+def validate_source_url(url: str) -> None:
+    """URL ที่จะดาวน์โหลด PDF ต้องเป็น http(s) เท่านั้น — โยน ValueError (ข้อความไทย) ถ้าไม่ผ่าน
+
+    กัน 2 ปัญหาจาก URL ที่มาจาก banks_config.json (แก้ได้จากหน้า /config): (1) argument injection —
+    ค่าที่ขึ้นต้นด้วย '-' เช่น '-K/tmp/evil' ถูก curl ตีความเป็น option ไม่ใช่ URL ถ้าไปโผล่ใน argv ตรง ๆ
+    (2) SSRF — URL แบบ file://, หรือชี้เข้า service ภายในเครือข่ายที่ไม่ใช่ http(s) เช็ค scheme เท่านั้น
+    ก็ครอบคลุมทั้งสองเคส เพราะสตริงที่ขึ้นต้นด้วย '-' หรือ scheme อื่นจะไม่ผ่าน startswith('http'/'https')
+    อยู่แล้ว ไม่ต้อง escape/quote อะไรเพิ่ม"""
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("URL ว่างเปล่า")
+    if not url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"URL ต้องขึ้นต้นด้วย http:// หรือ https:// เท่านั้น: {url!r}")
+
+
 def _download_pdf_curl(url: str, referer: str) -> bytes | None:
     UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -268,7 +282,7 @@ def _download_pdf_curl(url: str, referer: str) -> bytes | None:
         r = subprocess.run(
             ["curl", "-s", "-L", "--max-time", "60",
              "-A", UA, "-H", f"Referer: {referer}", "-H", "Accept: application/pdf,*/*",
-             url],
+             "--", url],
             capture_output=True, timeout=70,
         )
         data = r.stdout
@@ -337,7 +351,16 @@ def _download_pdf_impersonate(url: str, referer: str) -> bytes | None:
 
 def download_pdf(url: str, referer: str, mode: str = "curl") -> bytes | None:
     """ดาวน์โหลด PDF ประกาศ mode='curl' (ค่าเริ่มต้น, SCB ฯลฯ) หรือ 'impersonate'
-    (bypass bot-protection ด้วย curl_cffi — ใช้กับธนาคารที่ตั้ง fetch_mode: curl-impersonate)"""
+    (bypass bot-protection ด้วย curl_cffi — ใช้กับธนาคารที่ตั้ง fetch_mode: curl-impersonate)
+
+    ตรวจ validate_source_url() ก่อนเสมอ ไม่ว่าโหมดไหน — จุดเดียวที่ทุก caller (rate_monitor.py,
+    banks/bay.py, banks/*.py ผ่าน resolve_latest_url) ไหลผ่าน คืน None (ไม่ throw) ให้ผู้เรียกเดิม
+    ที่เช็ค `if pdf_bytes is None` อยู่แล้วทำงานต่อได้ตามปกติ (ล้มเหลวแบบเดียวกับดาวน์โหลดไม่สำเร็จ)"""
+    try:
+        validate_source_url(url)
+    except ValueError as e:
+        log.error(f"download_pdf: ปฏิเสธ URL ที่ไม่ปลอดภัย: {e}")
+        return None
     if mode == "impersonate":
         return _download_pdf_impersonate(url, referer)
     return _download_pdf_curl(url, referer)

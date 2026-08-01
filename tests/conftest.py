@@ -35,3 +35,17 @@ def fastapi_app(data_dir):
 def client(fastapi_app):
     from fastapi.testclient import TestClient
     return TestClient(fastapi_app)
+
+
+@pytest.fixture
+def admin_client(client, monkeypatch):
+    """client ที่ login แล้ว — เดินผ่าน flow OTP จริง (request_otp/login/verify) ไม่ได้ mint cookie เอง
+    บังคับรหัสให้เป็นค่าคงที่ผ่าน monkeypatch เพราะ request_otp generate รหัสสุ่มแล้วส่งอีเมลจริง
+    (ซึ่ง test env ไม่มี SMTP config — send_email แค่ log error แล้ว return False เฉย ๆ ไม่ throw)"""
+    from app.web import auth
+    monkeypatch.setattr(auth.secrets, "randbelow", lambda n: 654321)
+    auth.request_otp("test@example.com")
+    r = client.post("/login/verify", data={"email": "test@example.com", "code": "654321", "next": "/"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    return client

@@ -18,15 +18,17 @@
   // พื้นอ่อนของกล่องตัวอักษรย่อ (ใช้เฉพาะธนาคารที่ยังไม่มีไฟล์โลโก้) — คู่กับ BANK_ACCENT ตัวข้างบน
   const BANK_TINT = { SCB: '#F1EDF6', KBANK: '#E7F4EC', KTB: '#E7F0F9', BAY: '#FBF1E8', BBL: '#E6EDF5' };
 
-  function notice(kind, text) {
-    msgEl.innerHTML = `<div class="notice ${kind}">${text}</div>`;
-    setTimeout(() => { msgEl.innerHTML = ''; }, 5000);
-  }
-
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     }[c]));
+  }
+
+  // text มักมาจาก validateClientSide()/data.error ซึ่งฝัง t.key/b.code ที่ admin พิมพ์เองได้ — escape
+  // เสมอ ไม่ไว้ใจว่าข้อความ error สะอาด (self-XSS ของ admin เอง แต่ทำให้สม่ำเสมอกับจุดอื่นในไฟล์นี้)
+  function notice(kind, text) {
+    msgEl.innerHTML = `<div class="notice ${esc(kind)}">${esc(text)}</div>`;
+    setTimeout(() => { msgEl.innerHTML = ''; }, 5000);
   }
 
   // ธนาคารที่ parser ยังไม่รองรับโหมด max_tier/top_tier/max_all (①②③ "อัตราสูงสุด") — ว่างอยู่ตอนนี้
@@ -122,8 +124,8 @@
           ${cell('ผู้รับดอกเบี้ย', `<input type="text" class="t-depositor" value="${esc(t.depositor ?? '')}"
                   placeholder="${depositorDisabled ? 'ทุกประเภท' : 'บุคคลธรรมดา'}" ${depositorDisabled ? 'disabled title="โหมดสูงสุดทุกผู้ฝากไล่ทุกประเภทเอง"' : ''}>`,
                 depositorDisabled ? 'dim' : '')}
-          ${cell('ระยะ (เดือน)', `<input type="number" step="1" class="t-tenor num" value="${t.tenor_months ?? ''}" placeholder="—">`)}
-          ${cell('วงเงิน (ล้าน)', `<input type="number" step="0.1" class="t-amount num" value="${t.amount_m ?? ''}"
+          ${cell('ระยะ (เดือน)', `<input type="number" step="1" class="t-tenor num" value="${esc(t.tenor_months ?? '')}" placeholder="—">`)}
+          ${cell('วงเงิน (ล้าน)', `<input type="number" step="0.1" class="t-amount num" value="${esc(t.amount_m ?? '')}"
                   placeholder="${amountDisabled ? '—' : ''}" ${amountDisabled ? 'disabled title="โหมดอัตราสูงสุดไม่เจาะวงเงินเดียว"' : ''}>`,
                 amountDisabled ? 'dim' : '')}
         </div>

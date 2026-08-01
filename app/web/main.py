@@ -45,8 +45,15 @@ app.add_middleware(SessionMiddleware, secret_key=auth.session_secret(),
                     max_age=30 * 24 * 3600, same_site="lax")
 app.add_exception_handler(auth.LoginRequired, auth.login_required_handler)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+def _is_safe_link(url: str | None) -> bool:
+    """True เฉพาะ http(s) URL — ใช้ในเทมเพลตกันแสดงปุ่มลิงก์ที่ scheme อันตราย (javascript:/data:)
+    เป็นชั้นสำรองของการตรวจตอนรับเข้าใน api_request — กันข้อมูลเก่าที่หลุดเข้ามาก่อนแก้ด้วย"""
+    return bool(url) and url.strip().lower().startswith(("http://", "https://"))
+
+
 templates = Jinja2Templates(directory=TEMPLATES_DIR, context_processors=[auth.auth_context])
 templates.env.filters.update(thaidate.FILTERS)   # thai_date / thai_month / thai_datetime ...
+templates.env.tests["safe_link"] = _is_safe_link
 auth.configure(templates)
 app.include_router(auth.router)
 
@@ -578,6 +585,10 @@ async def api_request(request: Request):
         rec["bank_name"] = bank_name
         link = (body.get("link") or "").strip()[:500]
         if link:
+            # scheme ต้องเป็น http(s) เท่านั้น — กัน javascript:/data: URI ที่ฝังผ่านคำขอสาธารณะนี้
+            # (endpoint นี้ไม่ต้อง login) แล้วรอ admin กด "ลิงก์อ้างอิง" ที่หน้า /requests
+            if not link.lower().startswith(("http://", "https://")):
+                raise HTTPException(400, "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://")
             rec["link"] = link
 
     # (1) rate limit ต่อ IP — เช็คหลัง validate ผ่าน (ไม่ให้คำขอที่ผิดรูปมากินโควตา)

@@ -51,7 +51,7 @@
         {% else %}
         <span class="req-bank">{{ r.bank_display }}</span>
         {% endif %}
-        {% if r.link %}
+        {% if r.link and r.link is safe_link %}
         <a class="req-ref" href="{{ r.link }}" target="_blank" rel="noopener noreferrer">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>ลิงก์อ้างอิง
         </a>

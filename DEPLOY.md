@@ -217,16 +217,36 @@ cd checkrate && cp .env.example .env    # แล้วแก้ .env ตาม�
 ```
 
 ### ตั้งใน DSM Task Scheduler
-**Control Panel** → **Task Scheduler** → **Create** → **Scheduled Task** → **User-defined script**
-(User: `root`) แล้วใส่:
-```bash
-sh /volume1/bom321/Work/deposit-rate/docker/checkrate/scripts/update.sh
-```
-ตั้งเวลาตามต้องการ หรือปล่อยเป็น task ที่กด **Run** เอาเองเมื่อจะอัปเดต
 
-สคริปต์ปลอดภัยเมื่อรันซ้ำ: ถ้าไม่มี commit ใหม่จะ**ข้ามการ build** (แต่ยังเช็คให้ว่าคอนเทนเนอร์ยังรันอยู่
-ถ้าดับจะ start ให้) ผลลัพธ์ออกทั้ง stdout (Task Scheduler ส่งอีเมลให้ได้ถ้าเปิด "Send run details by email")
+**Control Panel** → **Task Scheduler** → **Create** → **Scheduled Task** → **User-defined script**
+
+ตั้งค่าที่ใช้เหมือนกันทั้งสอง task:
+
+| ช่อง | ค่า | ทำไม |
+|---|---|---|
+| **User** | `bom321` — **ไม่ใช่ `root`** | ⭐ สคริปต์นี้ไม่ต้องใช้สิทธิ์ root เลย (`bom321` อยู่ในกลุ่ม `docker` แล้ว) การรันเป็น root ทำให้ไฟล์ที่ถูกสร้างใหม่บนโฟลเดอร์ ACL กลายเป็นของ root ที่ผู้ใช้ปกติแตะไม่ได้ — **นี่คือสาเหตุที่ git repo บน NAS พังมาแล้วครั้งหนึ่ง** |
+| **Settings → Send run details by email** | ✅ เปิด | ไม่เปิด = deploy พังแล้วไม่มีใครรู้ สคริปต์ `exit 1` เงียบ ๆ ส่วนเว็บก็ยังรันเวอร์ชันเก่าต่อไปเหมือนไม่มีอะไรเกิดขึ้น |
+| **Run command** | `sh /volume1/bom321/Work/deposit-rate/docker/checkrate/scripts/update.sh` | |
+
+**สร้าง 2 task:**
+
+1. **`CheckRate update (manual)`** — ไม่ตั้งเวลา (Schedule → uncheck "Enable"): กด **Run** เองเมื่อจะอัปเดต
+   ใช้ตอนเพิ่ง push ของใหม่แล้วอยากเห็นผลทันที
+2. **`CheckRate update (weekly)`** — Schedule: **ทุกวันจันทร์ 07:00**
+   เผื่อกรณีลืมกดเอง และเป็นการยืนยันสัปดาห์ละครั้งว่าคอนเทนเนอร์ที่รันอยู่ยังตรงกับโค้ดใน repo
+
+> **เรื่องเวลา**: 07:00 มาก่อน cron ในคอนเทนเนอร์ที่รันตรวจอัตราตอน **09:00** อยู่ 2 ชั่วโมง —
+> ห่างพอให้ build/restart เสร็จสบาย ๆ **อย่าตั้งให้ชน 09:00** เพราะคอนเทนเนอร์จะถูก recreate
+> กลางคันแล้วงาน scrape รอบนั้นตายกลางทาง (ไม่ถึงกับเสียหาย — CSV เขียนแบบ atomic และรันใหม่ได้เร็ว
+> เพราะมี parse cache — แต่ก็ไม่มีเหตุให้ไปชนกัน) และเลือกวันที่ตัวเองจะได้เห็นอีเมลแจ้งผลด้วย
+
+สคริปต์ปลอดภัยเมื่อรันซ้ำ — รันตอนไม่มี commit ใหม่ก็ไม่เสียหาย (build ใช้ layer cache, `up -d`
+ไม่ recreate ถ้า config ไม่เปลี่ยน) ผลลัพธ์ออกทั้ง stdout (เข้าอีเมลของ Task Scheduler)
 และไฟล์ `update.log` ในโฟลเดอร์โปรเจกต์
+
+> **ถ้าเคยรัน task นี้ด้วย `root` มาก่อน** ให้ลบ log เก่าทิ้งหนึ่งครั้งตอนเปลี่ยนมาเป็น `bom321`:
+> `sudo rm -f /volume1/.../checkrate/update.log` — ไฟล์เดิมเป็นของ root ผู้ใช้ปกติเขียนทับไม่ได้
+> (สคริปต์ตรวจให้เองแล้ว: เขียนไม่ได้จะเตือนแล้วรันต่อโดยไม่บันทึกไฟล์ ไม่ทำให้ deploy ล้ม)
 
 **พฤติกรรมที่ควรรู้:**
 - ข้อมูลจริง (CSV/PDF/config ใน `HOST_DATA_DIR`) อยู่ในโฟลเดอร์ `data/` ของโปรเจกต์ แต่ `git pull`

@@ -1,7 +1,7 @@
 # CheckRate — Deposit Rate Monitor + Dashboard
 # Base: python:3.13-slim, ทำงานบน Synology DS916+ (Intel x86_64)
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # curl: จำเป็นสำหรับ download_pdf() ใน app/monitor/common.py
 # tzdata: ตั้ง timezone Asia/Bangkok

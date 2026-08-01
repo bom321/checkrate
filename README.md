@@ -81,7 +81,8 @@ CheckRate/
 ├── docker-compose.yml
 ├── crontab                      # ตารางเวลา supercronic (ค่าเริ่มต้น 09:00 Asia/Bangkok)
 ├── entrypoint.sh
-├── requirements.txt
+├── requirements.in              # dependency ที่คนเขียน (ไม่ pin เวอร์ชันเป๊ะ) — แก้ไฟล์นี้เวลาเพิ่ม/ลด package
+├── requirements.txt             # compile จาก requirements.in ด้วย pip-tools (pin เวอร์ชัน + hash) ห้ามแก้ตรง ๆ
 ├── .env.example                # ตัวอย่างค่า env (คัดลอกเป็น .env)
 └── DEPLOY.md                    # คู่มือ deploy บน Synology NAS (ไทย)
 ```
@@ -130,7 +131,10 @@ brew install tesseract tesseract-lang        # macOS
 # 1. เตรียม virtualenv + ติดตั้ง dependency
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # pin เวอร์ชัน + hash ไว้แล้ว (pip-tools) — เพิ่ม/ลด package แก้ที่
+                                   # requirements.in แล้วรัน: pip install pip-tools && pip-compile
+                                   # requirements.in --generate-hashes --no-strip-extras
+                                   # --output-file=requirements.txt
 
 # 2. เตรียมค่า config
 cp .env.example .env

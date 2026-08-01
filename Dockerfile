@@ -31,8 +31,13 @@ RUN curl -fsSLO "https://github.com/aptible/supercronic/releases/download/${SUPE
 
 WORKDIR /app
 
+# requirements.txt คอมไพล์มาจาก requirements.in ด้วย pip-tools (pin เวอร์ชันเป๊ะ + hash ของทุกไฟล์
+# ที่ยอมให้ติดตั้ง) — --require-hashes บังคับให้ pip ปฏิเสธ wheel/sdist ที่ hash ไม่ตรง กัน dependency
+# ถูกแทนที่ (supply chain) เงียบ ๆ แก้ dependency ต้องแก้ requirements.in แล้วรัน
+# `pip-compile requirements.in --generate-hashes --no-strip-extras --output-file=requirements.txt` ใหม่
+# ห้ามแก้ requirements.txt ตรง ๆ (เป็นไฟล์ที่ pip-compile generate ให้)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 COPY app/ ./app/
 COPY crontab ./crontab

@@ -42,7 +42,15 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY app/ ./app/
 COPY crontab ./crontab
 COPY entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh
+
+# **ห้ามเปลี่ยนกลับไปเป็น `chmod +x` เฉย ๆ** — โฟลเดอร์แชร์บน Synology ที่ใช้ Synology ACL มักมี POSIX
+# mode เป็น 000 (สิทธิ์จริงอยู่ใน ACL ซึ่ง build context ของ docker ไม่เอาไปด้วย) ไฟล์ที่ COPY เข้ามาจึง
+# กลายเป็นอ่านไม่ได้ทั้งชุด สมัยที่คอนเทนเนอร์ยังรันเป็น root ไม่มีใครเห็นปัญหา (root อ่านไฟล์ mode 000 ได้)
+# พอเปลี่ยนเป็น USER app + cap_drop ALL (ไม่มี DAC_OVERRIDE) คอนเทนเนอร์พังตอนบูตด้วย
+# "/bin/sh: 0: cannot open /app/entrypoint.sh: Permission denied" — exec ผ่าน (มีบิต x จาก chmod +x)
+# แต่ sh อ่านไฟล์ไม่ได้ ต้องตั้ง mode แบบสัมบูรณ์ให้อ่านได้ทั้ง tree ไม่ใช่แค่ entrypoint.sh
+# (a+rX = ไฟล์อ่านได้ทุกคน, โฟลเดอร์เข้าได้ทุกคน, ไม่ไปแจก x ให้ไฟล์ธรรมดา)
+RUN chmod -R a+rX /app && chmod 0755 /app/entrypoint.sh
 
 # รันเป็น non-root — เดิมไม่มี USER เลย บั๊กเขียนไฟล์ผิดพลาดใด ๆ จะเขียนทะลุถึง volume จริงบน NAS
 # ด้วยสิทธิ์ root uid 1000 = uid ของผู้ใช้แรกที่สร้างบน Synology DSM ตามปกติ — **ต้องตรวจ uid จริงของ

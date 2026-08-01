@@ -185,11 +185,27 @@ def _logo_url(code: str) -> str | None:
 
 
 def _month_options(code: str | None = None) -> list[str]:
-    """เดือนที่มีประกาศอย่างน้อย 1 ฉบับ — ใหม่ → เก่า (ไม่ระบุ code = รวมทุกธนาคาร)"""
+    """ทุกเดือนแบบต่อเนื่องของทุกธนาคารรวมกัน — ใหม่ → เก่า (ระบุ code = เฉพาะธนาคารนั้น)
+
+    ช่วง = เดือนของประกาศแรกสุด → เดือนล่าสุดที่มีประกาศ **หรือเดือนปัจจุบัน แล้วแต่อันไหนใหม่กว่า**
+    (กฎเดียวกับ `_month_options_counted`) — เดิมคืนเฉพาะเดือนที่มีประกาศ พอขึ้นเดือนใหม่แล้วยังไม่มี
+    ธนาคารไหนออกประกาศ เดือนปัจจุบันจะไม่อยู่ในลิสต์เลย หน้า overview จึงค้างอยู่ที่เดือนก่อนหน้า
+    """
     codes = [code] if code else [b["code"] for b in da.load_banks()]
-    months = {(r.get("effective_date") or "")[:7]
-              for c in codes for r in da.read_history(c)}
-    return sorted((m for m in months if _MONTH_RE.match(m)), reverse=True)
+    months = {m for c in codes for r in da.read_history(c)
+              if _MONTH_RE.match(m := (r.get("effective_date") or "")[:7])}
+    if not months:
+        return []
+
+    first, last = min(months), max(max(months), datetime.now().strftime("%Y-%m"))
+    y, m = int(first[:4]), int(first[5:7])
+    ly, lm = int(last[:4]), int(last[5:7])
+
+    out = []
+    while (y, m) <= (ly, lm):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return list(reversed(out))
 
 
 def _month_options_counted(code: str) -> list[dict]:

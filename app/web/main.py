@@ -344,7 +344,10 @@ def serve_pdf(code: str, filename: str):
     # กัน path traversal
     if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".pdf"):
         raise HTTPException(400, "ชื่อไฟล์ไม่ถูกต้อง")
-    path = da.pdf_abspath(code, filename)
+    bank = da.get_bank(code)
+    if bank is None:
+        raise HTTPException(404, "ไม่พบธนาคาร")
+    path = da.pdf_abspath(bank["code"], filename)
     if not os.path.isfile(path):
         raise HTTPException(404, "ไม่พบไฟล์ PDF")
     # content_disposition_type="inline" สำคัญ: ค่าเริ่มต้นของ Starlette คือ "attachment" ซึ่งสั่งให้

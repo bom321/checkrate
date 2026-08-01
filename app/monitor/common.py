@@ -566,9 +566,11 @@ def _active_smtp_config() -> dict:
     password = os.environ.get(f"{prefix}PASSWORD")
     sender = os.environ.get(f"{prefix}FROM") or user
     insecure = os.environ.get(f"{prefix}INSECURE", "0") == "1"
+    ca_file = os.environ.get(f"{prefix}CA_FILE") or None
     return {
         "provider": provider, "label": label, "host": host, "port": port,
-        "user": user, "password": password, "sender": sender, "insecure": insecure,
+        "user": user, "password": password, "sender": sender,
+        "insecure": insecure, "ca_file": ca_file,
     }
 
 
@@ -594,10 +596,18 @@ def send_email(subject: str, html_body: str, to: list[str] | None = None) -> boo
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         # Gmail (ชุดเดิม): ctx=None ให้ smtplib ใช้ default ของมันเอง (behavior เดิมเป๊ะ ห้ามแตะ)
-        # MailPlus: ต้องคุมเอง — verify ปกติ เว้นแต่เปิด SMTP2_INSECURE (กล่อง Synology ใบรับรอง self-signed)
+        # MailPlus: ต้องคุมเอง — ลำดับความสำคัญ CA_FILE > INSECURE > default
+        #   SMTP2_CA_FILE ชี้ไปใบรับรอง self-signed ของกล่อง Synology → verify จริงแบบไม่ต้องปิด
+        #   ตรวจสอบทั้งหมด (ปลอดภัยกว่า SMTP2_INSECURE มาก) ไม่ตั้งค่านี้ค่อย fallback ไป INSECURE
+        #   (ปิดตรวจสอบทั้งดุ้น — ใช้เป็นทางเลือกสุดท้าย) แล้วค่อย default (verify ปกติ)
         ctx = None
         if cfg["provider"] == "mailplus":
-            ctx = ssl._create_unverified_context() if cfg["insecure"] else ssl.create_default_context()
+            if cfg["ca_file"]:
+                ctx = ssl.create_default_context(cafile=cfg["ca_file"])
+            elif cfg["insecure"]:
+                ctx = ssl._create_unverified_context()
+            else:
+                ctx = ssl.create_default_context()
 
         if port == 465:
             with smtplib.SMTP_SSL(host, port, timeout=30, context=ctx) as server:

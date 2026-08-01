@@ -103,7 +103,8 @@ CheckRate/
 | `EMAIL_FROM` | อีเมลผู้ส่ง (มักเป็นตัวเดียวกับ `SMTP_USER`) |
 | `EMAIL_TO` | ผู้รับเริ่มต้น (คั่นหลายคนด้วย `,`) — แก้ผ่านหน้าเว็บได้ (เก็บใน `settings.json`) |
 | `SMTP2_HOST` / `SMTP2_PORT` / `SMTP2_USER` / `SMTP2_PASSWORD` / `SMTP2_FROM` | ชุด SMTP สำรอง (เช่น Synology MailPlus) — ชื่อฟิลด์เหมือน `SMTP_*` ทุกตัว |
-| `SMTP2_INSECURE` | ตั้ง `1` เพื่อข้ามการตรวจสอบใบรับรอง TLS ของชุดสำรอง — ใช้เฉพาะเมื่อเจอ `SSLCertVerificationError` (ใบรับรอง self-signed/hostname ไม่ตรง เช่น ต่อกล่อง Synology ผ่าน LAN IP) ลอง `0` ก่อนเสมอ |
+| `SMTP2_CA_FILE` | path ไปใบรับรอง CA ของกล่อง Synology (self-signed) — ให้ verify TLS ผ่านโดยไม่ต้องปิดการตรวจสอบทั้งดุ้นแบบ `SMTP2_INSECURE` **แนะนำให้ใช้ตัวนี้ก่อนเสมอ** ถ้าเจอ `SSLCertVerificationError` |
+| `SMTP2_INSECURE` | ตั้ง `1` เพื่อข้ามการตรวจสอบใบรับรอง TLS ของชุดสำรองทั้งดุ้น — ทางเลือกสุดท้ายเมื่อตั้ง `SMTP2_CA_FILE` ไม่ได้จริง ๆ (ลำดับความสำคัญ: `SMTP2_CA_FILE` > `SMTP2_INSECURE` > ปกติ) |
 | `DATA_DIR` | ตำแหน่งเก็บข้อมูล (local: `./data`, Docker: `/data`) |
 | `WEB_HOST` / `WEB_PORT` | host/port ของเว็บ (ค่าเริ่มต้น `0.0.0.0` / `8080`) |
 | `ADMIN_EMAILS` | อีเมลที่มีสิทธิ์เข้า `/config`, `/email`, `/logs` และกดปุ่มรันตรวจสอบ (คั่นหลายคนด้วย `,`) — ไม่มีทางแก้จากเว็บ |

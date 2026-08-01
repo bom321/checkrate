@@ -374,7 +374,10 @@ def bank_detail(request: Request, code: str, month: str | None = None):
         for r in history:
             v = _fmt_rate(r.get(key))
             series.append(float(v) if v is not None else None)
+        # tenor ส่งไปให้แผงเลือกเส้น (10b) เรียงตาม "ระยะฝาก" ได้ — อีก 2 แบบ (เปลี่ยนแปลงล่าสุด /
+        # อัตราสูง→ต่ำ) คำนวณจาก data ใน detail.js เองได้ ไม่ต้องส่งเพิ่ม
         datasets.append({"key": key, "label": _target_label(t),
+                         "tenor": t.get("tenor_months"),
                          "dep": _depositor_pill(t.get("depositor")), "data": series})
 
     return templates.TemplateResponse(request, "bank_detail.html", {

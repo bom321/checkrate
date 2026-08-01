@@ -882,40 +882,131 @@ select:disabled { background-image: none; cursor: not-allowed; }
 .bd-hero b { font-weight: 600; }
 .bd-hero b.accent { color: var(--brand); }
 
-/* ── การ์ด "แนวโน้มย้อนหลัง" (เส้น/แกน/ป้าย วาดเป็น SVG ใน detail.js) ── */
+/* ── การ์ด "แนวโน้มอัตราย้อนหลัง" (ดีไซน์ 10b) ──
+   กราฟหลักซ้าย + แผงเลือกเส้นขวา 340px · ชิปช่วงเวลาอยู่ใต้กราฟ
+   เส้น/แกน/ป้าย/tooltip และรายการในแผงขวา สร้างจาก detail.js ทั้งหมด */
 .bd-trend { margin-bottom: 14px; }
-.bd-trend .ov-panel-head { align-items: flex-start; padding: 16px 22px; }
+.bd-trend-head { align-items: flex-start; padding: 16px 22px; }
 .bd-trend-sub { font-size: 12.5px; font-weight: 400; color: var(--muted-soft); margin-top: 2px; }
+.bd-trend-tools { display: flex; align-items: center; gap: 8px; }
 .bd-trend-badge { font-size: 12.5px; font-weight: 500; padding: 6px 12px; border-radius: 20px; white-space: nowrap; }
 .bd-trend-badge.down { background: var(--down-soft); color: var(--down); }
 .bd-trend-badge.up { background: var(--brand-soft); color: var(--brand); }
 .bd-trend-badge.mixed { background: var(--warn-soft); color: var(--warn); }
-.bd-trend-legend {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px;
-  padding: 13px 22px 4px; font-size: 13px; font-weight: 500; color: #5C5F65;
+#trend-download { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* ตัวเลือกรูปแบบข้อมูล (รายวัน/เฉพาะการเปลี่ยนแปลง) — วางหน้าปุ่มดาวน์โหลดตามดีไซน์ */
+#trend-dl-mode {
+  font: 500 11.5px var(--sans); padding: 8px 10px; border-radius: 9px;
+  border: 1px solid #DAD7D0; background: var(--card); color: #3C3F45;
 }
-/* .item กดได้ — เพิ่ม/ซ่อนเส้นในกราฟ (ดีไซน์โชว์แค่ 3 เส้นแรกเป็นค่าเริ่มต้น ธนาคารที่ติดตามเกิน 3
-   รายการต้องกดเพิ่มเอง กันป้ายค่าท้ายเส้นทับกันจนอ่านไม่ออกถ้าเปิดหมดพร้อมกัน) */
-.bd-trend-legend .item {
-  display: flex; align-items: center; gap: 7px; cursor: pointer; border-radius: 6px;
-  padding: 2px 4px; margin: -2px -4px;
+
+/* ความสูงคงที่ 480px ตาม 10b — กราฟยืดเต็มที่เหลือหลังหักแถวชิป, แผงขวาเลื่อนเองภายใน */
+.bd-trend-main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
+.bd-trend-plot { display: flex; flex-direction: column; height: 480px; border-right: 1px solid #F0EDE7; }
+.bd-trend-body { flex: 1; min-height: 0; position: relative; padding: 10px 8px 0 10px; }
+.bd-trend-svg { width: 100%; height: 100%; display: block; font-family: var(--sans); }
+.bd-trend-empty {
+  position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--muted-soft); text-align: center; padding: 0 24px;
 }
-.bd-trend-legend .item:hover { background: var(--surface); }
-.bd-trend-legend .item:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
-.bd-trend-legend .item.off { opacity: .4; }
-.bd-trend-legend .sw { width: 18px; height: 3px; border-radius: 2px; flex: none; }
-.bd-trend-legend .unit { margin-left: auto; font-weight: 400; font-size: 12.5px; color: var(--muted-soft); letter-spacing: .02em; }
-.bd-trend-body { padding: 4px 22px 20px; }
-.bd-trend-svg { width: 100%; height: auto; display: block; font-family: var(--sans); }
-/* ปุ่มช่วงเวลาใต้กราฟ — สลับด้วย .on จาก detail.js กันข้อมูลไม่พอด้วย :disabled */
-.bd-trend-range { display: flex; gap: 6px; padding: 0 22px 18px; flex-wrap: wrap; }
+/* ต้องระบุเอง — .bd-trend-empty{display:flex} ชนะ [hidden]{display:none} ของ UA stylesheet */
+.bd-trend-empty[hidden] { display: none; }
+/* ชิปช่วงเวลาใต้กราฟ — สลับด้วย .on จาก detail.js กันข้อมูลไม่พอด้วย :disabled */
+.bd-trend-range {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  border-top: 1px solid #F0EDE7; padding: 9px 18px;
+}
 .bd-trend-range button {
-  font: 500 13px var(--sans); padding: 7px 13px; border-radius: 8px;
+  font: 500 12.5px var(--sans); padding: 6px 12px; border-radius: 8px;
   border: none; background: none; color: #6E7178; cursor: pointer;
 }
 .bd-trend-range button:hover:not(:disabled) { background: var(--surface); }
 .bd-trend-range button.on { font-weight: 600; background: var(--ink); color: #fff; }
 .bd-trend-range button:disabled { opacity: .4; cursor: default; }
+.bd-trend-rangeinfo { margin-left: auto; font-size: 11px; color: var(--muted-soft); letter-spacing: .02em; }
+
+/* ── แผงขวา: เลือกว่าจะให้เส้นไหนขึ้นกราฟ ── */
+.bd-trend-side { display: flex; flex-direction: column; height: 480px; min-width: 0; }
+.bd-side-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 14px 16px 9px;
+}
+.bd-side-title { font-size: 12.5px; font-weight: 600; }
+.bd-side-frac { font-weight: 400; color: var(--muted); }
+.bd-side-clear {
+  border: none; background: none; padding: 2px 4px; margin: -2px -4px; border-radius: 6px;
+  font: 500 11px var(--sans); color: #2B6CB0; cursor: pointer;
+}
+.bd-side-clear:hover:not(:disabled) { background: var(--surface); }
+.bd-side-clear:disabled { color: var(--muted-soft); cursor: default; }
+.bd-side-filter {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
+  padding: 0 15px 10px; border-bottom: 1px solid #F0EDE7;
+}
+.bd-side-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.bd-side-chips button {
+  font: 500 10.5px var(--sans); padding: 5px 10px; border-radius: 20px;
+  border: none; background: #ECEAE4; color: #5C5F65; cursor: pointer;
+}
+/* ชิปที่ยังไม่เลือกใช้สีอ่อนของประเภทผู้ฝากเดียวกับ .pill-dep — ที่เลือกอยู่กลับเป็นดำทึบ */
+.bd-side-chips button.dep-person { background: #EAF0F7; color: #2B6CB0; }
+.bd-side-chips button.dep-fund   { background: #F3EEF9; color: #7C5CA8; }
+.bd-side-chips button.dep-gov    { background: var(--warn-soft); color: var(--warn); }
+.bd-side-chips button.dep-corp   { background: #E7F3F1; color: #00796B; }
+.bd-side-chips button.on { font-weight: 600; background: var(--ink); color: #fff; }
+/* ไม่ดัน margin-left:auto — แผงกว้าง 340px ชิปกรองมักล้นบรรทัดอยู่แล้ว ถ้าดันชิดขวาช่องเรียงจะตกไป
+   กินอีกบรรทัดของตัวเอง เบียดพื้นที่รายการอัตราให้เลื่อนมากขึ้นโดยไม่จำเป็น */
+.bd-side-sort { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted); }
+.bd-side-sort select {
+  width: auto; font: 500 10.5px var(--sans); padding: 5px 22px 5px 9px;
+  border-radius: 8px; border: 1px solid var(--line-strong); color: #5C5F65; background-color: var(--card);
+}
+.bd-side-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 3px; padding: 9px 11px 11px;
+}
+/* หนึ่งแถว = หนึ่งอัตรา · จุดสี่เหลี่ยม + ชื่อ/ป้ายประเภทผู้ฝาก/วงเงิน — ไม่โชว์ตัวเลขอัตราอีกต่อไป
+   (ดีไซน์ Rate Trend Chart ตั้งใจให้แผงนี้เป็น "ตัวเลือกเส้น" ล้วน ๆ ไม่ใช่ตารางย่อยที่แข่งกับกราฟ
+   ดูค่าจริงได้จากกราฟ/tooltip แทน) แถวที่ปิดอยู่แยกด้วยสีชื่อจาง + จุดกลวงแทนการหรี่ทั้งแถวแบบเดิม */
+.bd-side-item {
+  display: flex; align-items: center; gap: 11px; text-align: left; width: 100%;
+  border: 1px solid transparent; background: none; border-radius: 10px;
+  padding: 10px 13px; cursor: pointer; font-family: var(--sans);
+}
+.bd-side-item:hover { background: var(--surface); }
+.bd-side-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.bd-side-item.on { background: #FBFAF8; border-color: #EAE7E1; }
+.bd-side-dot { width: 12px; height: 12px; border-radius: 3px; flex: none; box-sizing: border-box; }
+.bd-side-item.off .bd-side-dot { border: 1.5px solid #CFCBC3; background: none; }
+.bd-side-main { min-width: 0; flex: 1; }
+.bd-side-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+/* pill-dep เดิมอยู่ในคอนเทกซ์ block (ไม่ต้องกันหด) ตอนนี้ย้ายเข้ามาเป็นลูก flex ของ .bd-side-top
+   ต้อง flex:none ไม่งั้นบีบเล็กลงเมื่อชื่อยาว แล้ว .bd-side-name เองก็ต้อง min-width:0 (ค่าเริ่มต้นของ
+   flex item คือ min-width:auto = ห้ามหดต่ำกว่าความกว้างเนื้อหา) ไม่งั้น ellipsis ด้านล่างไม่ทำงานจริง
+   ดันความกว้างแถวจนล้น .bd-side-list (340px คงที่) แล้วกราฟข้าง ๆ เบี้ยว */
+.bd-side-top .pill-dep { flex: none; }
+.bd-side-name {
+  display: block; flex: 1 1 auto; min-width: 0;
+  font: 600 13px var(--sans); color: var(--ink); line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bd-side-item.off .bd-side-name { color: #8A8D93; }
+.bd-side-sub {
+  display: block; font: 400 11px var(--sans); color: #9B9EA4; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bd-side-empty { padding: 16px 8px; font-size: 12px; color: var(--muted-soft); text-align: center; }
+.bd-side-foot {
+  border-top: 1px solid #F0EDE7; padding: 10px 16px;
+  font: 400 10.5px/1.5 var(--sans); color: var(--muted-soft);
+}
+
+/* จอแคบกว่า ~1080px แผงขวาบีบกราฟจนอ่านไม่ออก — วางแผงลงมาใต้กราฟแทน (ยังเป็นเดสก์ท็อป) */
+@media (max-width: 1080px) {
+  .bd-trend-main { grid-template-columns: minmax(0, 1fr); }
+  .bd-trend-plot { border-right: none; height: 400px; }
+  .bd-trend-side { height: auto; max-height: 340px; border-top: 1px solid #F0EDE7; }
+}
 
 /* toolbar ของธนาคารนี้ — status pill ชิดขวาเสมอ · ปุ่มรอง (เติมข้อมูลย้อนหลัง / ค้นหาประวัติทั้งปี /
    กรอกค่าเอง) เป็นไอคอนสี่เหลี่ยม 38×38 ทุกความกว้าง (ต่างจากหน้าอื่นที่ยุบเหลือไอคอนแค่บนมือถือ —

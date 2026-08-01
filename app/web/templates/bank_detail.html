@@ -155,28 +155,71 @@
 </div>
 
 {% if has_data %}
-<!-- แนวโน้มย้อนหลัง — desktop เท่านั้น design ไม่มีส่วนนี้บนมือถือ
-     ส่ง history ทั้งหมดผ่าน #chart-data แล้วให้ detail.js กรองตามปุ่มช่วงเวลา (.bd-trend-range) เอง
-     หัวการ์ด/ตัวคั่นสี/แกน/ป้ายค่า วาดโดย detail.js ทั้งหมด -->
+<!-- แนวโน้มย้อนหลัง (ดีไซน์ 10b) — desktop เท่านั้น design ไม่มีส่วนนี้บนมือถือ
+     โครง 10b: กราฟหลักซ้าย (แสดงเฉพาะเส้นที่เลือก) + แผงเลือกเส้นขวา 340px (กรอง/เรียง/ติ๊กทีละอัตรา)
+     ชิปช่วงเวลาย้ายมาอยู่ "ใต้กราฟ" และเริ่มต้นที่ "ปีปัจจุบัน" (YTD) แทน "1 ปี" แบบเดิม
+     ส่ง history ทั้งหมดผ่าน #chart-data แล้วให้ detail.js กรอง/เรียง/วาดเองทั้งหมด
+     (แกน/เส้น/ป้ายค่า/tooltip รวมถึงรายการในแผงขวา สร้างจาก detail.js ล้วน — เทมเพลตมีแต่โครง) -->
 <div class="ov-panel bd-trend">
-  <div class="ov-panel-head">
+  <div class="ov-panel-head bd-trend-head">
     <div>
-      <div class="ov-panel-title">แนวโน้มย้อนหลัง</div>
-      <div class="bd-trend-sub">อัตราแต่ละระยะ ตามวันที่ประกาศมีผล · <span id="trend-count"></span> ประกาศ · <span id="trend-span"></span></div>
+      <div class="ov-panel-title">แนวโน้มอัตราย้อนหลัง</div>
+      <div class="bd-trend-sub">แสดงเฉพาะอัตราที่เลือกจากแผงด้านขวา · จุดคือวันที่ประกาศ — ชี้เพื่อดูรายละเอียด</div>
     </div>
-    <span id="trend-badge" class="bd-trend-badge" hidden></span>
+    <div class="bd-trend-tools">
+      <span id="trend-badge" class="bd-trend-badge" hidden></span>
+      {# ดีไซน์เขียน "Download" แต่ CLAUDE.md กำหนดให้ UI เป็นภาษาไทยทั้งหมด ปุ่มจึงยังเป็น "ดาวน์โหลด CSV"
+         เดิม — เพิ่มแค่ตัวเลือกรูปแบบข้อมูลหน้าปุ่มตามดีไซน์ #}
+      <select id="trend-dl-mode" aria-label="รูปแบบข้อมูลที่จะดาวน์โหลด">
+        <option value="daily">รายวัน</option>
+        <option value="change">เฉพาะการเปลี่ยนแปลง</option>
+      </select>
+      <button id="trend-download" type="button" class="btn small" data-code="{{ bank.code }}"
+              title="ดาวน์โหลดข้อมูลกราฟของเส้นที่เลือกไว้เป็นไฟล์ CSV">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/></svg>
+        ดาวน์โหลด CSV
+      </button>
+    </div>
   </div>
-  <div id="trend-legend" class="bd-trend-legend">
-    <span class="unit">% ต่อปี</span>
-  </div>
-  <div class="bd-trend-body">
-    <svg id="trend" class="bd-trend-svg" viewBox="0 0 1500 260" role="img" aria-label="กราฟแนวโน้มอัตราดอกเบี้ยย้อนหลัง"></svg>
-  </div>
-  <div class="bd-trend-range" role="group" aria-label="ช่วงเวลาของกราฟ">
-    <button type="button" data-months="3">3 เดือน</button>
-    <button type="button" data-months="6">6 เดือน</button>
-    <button type="button" data-months="12" class="on">1 ปี</button>
-    <button type="button" data-months="0">ทั้งหมด</button>
+
+  <div class="bd-trend-main">
+    <div class="bd-trend-plot">
+      <div class="bd-trend-body">
+        <!-- viewBox ตั้งจาก detail.js ตามขนาดจริงของกล่อง (หน่วย = พิกเซล) ไม่ fix ไว้ที่นี่
+             เพราะโครง 10b ล็อกความสูงคอลัมน์ไว้ ถ้าใช้ viewBox ตายตัวตัวหนังสือจะย่อ/ยืดตามความกว้าง -->
+        <svg id="trend" class="bd-trend-svg" role="img" aria-label="กราฟแนวโน้มอัตราดอกเบี้ยย้อนหลัง"></svg>
+        <p id="trend-empty" class="bd-trend-empty" hidden>ยังไม่ได้เลือกอัตรา — เลือกจากแผงด้านขวาเพื่อแสดงกราฟ</p>
+      </div>
+      <div class="bd-trend-range" role="group" aria-label="ช่วงเวลาของกราฟ">
+        <button type="button" data-months="3">3 เดือน</button>
+        <button type="button" data-months="6">6 เดือน</button>
+        <button type="button" data-range="ytd" class="on">ปีปัจจุบัน</button>
+        <button type="button" data-months="12">1 ปี</button>
+        <button type="button" data-months="0">ทั้งหมด</button>
+        <span class="bd-trend-rangeinfo"><span id="trend-count"></span> ประกาศ · <span id="trend-span"></span> · % ต่อปี</span>
+      </div>
+    </div>
+
+    <aside class="bd-trend-side">
+      <div class="bd-side-head">
+        <span class="bd-side-title">อัตราที่ติดตาม
+          <span class="bd-side-frac">(<span id="trend-on-count">0</span>/<span id="trend-all-count">0</span>)</span>
+        </span>
+        <button id="trend-clear" type="button" class="bd-side-clear">ล้างการเลือก</button>
+      </div>
+      <div class="bd-side-filter">
+        <div id="trend-filter" class="bd-side-chips" role="group" aria-label="กรองตามประเภทผู้ฝาก"></div>
+        <label class="bd-side-sort">เรียง
+          <select id="trend-sort">
+            <option value="tenor">ระยะฝาก</option>
+            <option value="recent">เปลี่ยนแปลงล่าสุด</option>
+            <option value="rate">อัตราสูง→ต่ำ</option>
+          </select>
+        </label>
+      </div>
+      <div id="trend-list" class="bd-side-list"></div>
+      <div class="bd-side-foot">แตะเพื่อเพิ่ม/ลบเส้นจากกราฟ · แนะนำเลือกไม่เกิน 4 เส้นเพื่อให้อ่านง่าย</div>
+    </aside>
   </div>
 </div>
 

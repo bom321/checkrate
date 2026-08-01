@@ -43,6 +43,33 @@ JOB_TIMEOUT_SEC = int(os.environ.get("MONITOR_JOB_TIMEOUT", "3600") or "3600")
 app = FastAPI(title="CheckRate — Deposit Rate Dashboard")
 app.add_middleware(SessionMiddleware, secret_key=auth.session_secret(),
                     max_age=30 * 24 * 3600, same_site="lax")
+
+# CSP: 'unsafe-inline' ใน script-src/style-src เพราะ template ปัจจุบันมี inline <script> หลายก้อน
+# (base.html, bank_detail.html) และ inline style="" (~10 จุด) — รัดเป็น 'self' ล้วนได้ต้องย้าย
+# ออกไปเป็นไฟล์ static ก่อนทั้งหมด (ดู SEC-15) ตอนนี้ CSP ยังกัน script/style จากโดเมนอื่นได้เต็มที่
+# (defense-in-depth ของ SEC-01) แค่ inline ที่เขียนเองในโค้ดยังผ่าน — img-src เผื่อ data: ให้
+# background-image แบบ inline SVG ใน style.css, ไม่มี CDN ไหนเลย (ฟอนต์/โลโก้ self-host หมด)
+_CSP = ("default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'")
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = _CSP
+    return response
+
+
 app.add_exception_handler(auth.LoginRequired, auth.login_required_handler)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def _is_safe_link(url: str | None) -> bool:

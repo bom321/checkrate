@@ -81,7 +81,19 @@ HOST_DATA_DIR="$(env_val HOST_DATA_DIR)"
 BEFORE="$($GIT rev-parse HEAD)"
 log "commit ปัจจุบัน: $($GIT log -1 --format='%h %s' HEAD)"
 
+# สคริปต์นี้ออกแบบให้รันเป็น root จาก DSM Task Scheduler — ไฟล์ที่ git สร้างใหม่ (packfile ตอน
+# fetch/repack) บนโฟลเดอร์แชร์ที่เปิด Synology ACL จะได้ POSIX mode 000 ทำให้รอบถัดไปที่รัน git
+# ด้วยผู้ใช้ปกติพังทั้ง repo ด้วย "packfile ... index unavailable" + reflog/blob เสียเป็นร้อยบรรทัด
+# (เจอจริง ส.ค. 2569 — เสียเวลาไล่หาว่า repo เสียทั้งที่ไฟล์อยู่ครบ แค่อ่านไม่ได้)
+# core.sharedRepository สั่งให้ git ตั้ง mode เองโดยไม่สนใจ umask ของ root — ตั้งทุกรอบเพราะ idempotent
+$GIT config core.sharedRepository 0644 2>/dev/null || true
+
 $GIT fetch --quiet origin "$BRANCH" || die "git fetch ไม่สำเร็จ (เช็คเน็ต/สิทธิ์ของ remote)"
+
+# ตามเก็บไฟล์ที่ถูกสร้างไว้ก่อนหน้าที่จะตั้ง core.sharedRepository (และตัวที่ git ไม่ได้จัดการให้)
+if [ "$(id -u)" = "0" ]; then
+    chmod -R a+rX .git 2>/dev/null || true
+fi
 
 # กันเคสมีคนแก้ไฟล์บน NAS ค้างไว้ — merge จะพังกลางทางแล้ว repo ค้างสถานะแปลก ๆ
 if ! $GIT diff --quiet || ! $GIT diff --cached --quiet; then

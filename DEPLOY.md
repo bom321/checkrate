@@ -272,15 +272,38 @@ docker inspect checkrate --format '{{.State.Health.Status}} restarts={{.RestartC
 
 ### `git pull` บน NAS พังด้วย `packfile ... index unavailable`
 
-`.idx` ของ packfile หาย อ่าน commit เก่าไม่ได้ — ซ่อมก่อนแล้วค่อย pull:
+พร้อมกับ `invalid reflog entry`, `missing blob`, `broken link from ...` เป็นร้อยบรรทัด —
+**ทั้งหมดมาจากสาเหตุเดียว และไม่ใช่ repo เสีย** เช็คก่อน:
+
 ```bash
 cd /volume1/bom321/Work/deposit-rate/docker/checkrate
-git config --global --add safe.directory "$PWD"    # ตั้งครั้งเดียว ไม่ต้อง -c ทุกคำสั่ง
 ls -la .git/objects/pack/
-git index-pack .git/objects/pack/pack-<hash>.pack
-git fsck
 ```
-ถ้าซ่อมไม่ขึ้น: `git clone` ใหม่ลงโฟลเดอร์ข้าง ๆ แล้วย้าย `.env` + `data/` ไปใส่ (ทั้งสองอย่างไม่ได้อยู่ใน git)
+
+ถ้าเห็นแบบนี้ (mode `000`, เจ้าของ `root`) แปลว่าไฟล์อยู่ครบแต่**อ่านไม่ได้**:
+```
+-rwxrwxrwx+ 1 root root  16400  multi-pack-index
+----------  1 root root  16304  pack-22bc1f18....idx      ← อ่านไม่ได้
+----------  1 root root 865079  pack-22bc1f18....pack
+```
+
+**สาเหตุ**: `update.sh` ถูกรันเป็น `root` จาก DSM Task Scheduler → git สร้าง packfile ใหม่ตอน
+fetch/repack → ไฟล์ที่ root สร้างบนโฟลเดอร์แชร์ที่เปิด Synology ACL ได้ POSIX mode `000`
+(เรื่องเดียวกับที่ `Dockerfile` เตือนไว้เรื่องไฟล์ที่ COPY เข้า image) → รอบถัดไปที่รัน git
+ด้วยผู้ใช้ปกติจึงอ่าน pack ไม่ได้ทั้งก้อน **`git index-pack` ไม่ช่วย เพราะ index ไม่ได้หาย**
+
+```bash
+sudo chown -R bom321:users .git
+sudo chmod -R u+rwX,go+rX .git     # ← ตัวสำคัญ mode 000 บล็อกแม้แต่เจ้าของ
+git fsck                           # ต้องเงียบ
+```
+
+กันไม่ให้เกิดอีก (ตั้งครั้งเดียวต่อ repo — `update.sh` ตั้งให้เองด้วยแล้ว):
+```bash
+git config core.sharedRepository 0644    # ให้ git สร้างไฟล์ที่อ่านได้เสมอ ไม่ขึ้นกับ umask ของ root
+```
+
+ถ้ายังไม่หาย: `git clone` ใหม่ลงโฟลเดอร์ข้าง ๆ แล้วย้าย `.env` + `data/` ไปใส่ (ทั้งสองอย่างไม่ได้อยู่ใน git)
 
 ---
 

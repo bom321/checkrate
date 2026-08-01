@@ -29,10 +29,12 @@
 
 ## ขั้นตอนที่ 2 — เตรียมข้อมูลบน NAS
 
-1. เปิด **File Station** บน DSM แล้วสร้างโฟลเดอร์เก็บข้อมูล เช่น `/volume1/deposit-rate/`
-   (ชื่อ/ตำแหน่งปรับได้ — จะตั้งค่าจริงใน `.env` ด้วย `HOST_DATA_DIR` ในขั้นตอนถัดไป)
+1. สร้างโฟลเดอร์เก็บข้อมูล — ที่ใช้จริงตอนนี้คือ `data/` **ในโฟลเดอร์โปรเจกต์เอง**:
+   `/volume1/bom321/Work/deposit-rate/docker/checkrate/data/`
+   (ตำแหน่งปรับได้ — จะตั้งค่าจริงใน `.env` ด้วย `HOST_DATA_DIR` ในขั้นตอนถัดไป · วางไว้ในโปรเจกต์ได้
+   อย่างปลอดภัยเพราะ `data/` ติดทั้ง `.gitignore` (git pull ไม่แตะ) และ `.dockerignore` (ไม่เข้า build context))
 2. คัดลอกไฟล์ข้อมูลเดิมจาก Mac (โฟลเดอร์ `data/` ในโปรเจกต์นี้ ซึ่ง seed มาจาก
-   `/Users/bom321/Desktop/Learn Claude/Deposit Rate/SCB/` แล้ว) เข้าไปใน `/volume1/deposit-rate/`:
+   `/Users/bom321/Desktop/Learn Claude/Deposit Rate/SCB/` แล้ว) เข้าไปในโฟลเดอร์นั้น:
    - `banks_config.json`
    - `settings.json`
    - `scb_deposit_rate.csv` (และ CSV อื่น ๆ ถ้ามี)
@@ -40,7 +42,7 @@
    - (ไม่บังคับ) log เดิม → เปลี่ยนชื่อเป็น `rate_monitor.log`
 3. โครงสร้างที่ควรได้บน NAS:
    ```
-   /volume1/deposit-rate/
+   /volume1/bom321/Work/deposit-rate/docker/checkrate/data/
    ├── banks_config.json
    ├── settings.json
    ├── scb_deposit_rate.csv
@@ -48,14 +50,18 @@
    ```
 4. **คอนเทนเนอร์รันเป็น non-root (uid 1000)** — ต้องให้โฟลเดอร์นี้เขียนได้โดย uid 1000 ไม่งั้น
    คอนเทนเนอร์จะพังตอนบูต (ดู `entrypoint.sh` — จะแจ้ง error ชัดเจนถ้าเขียนไม่ได้ ไม่ crash เงียบ ๆ)
-   ตรวจเจ้าของโฟลเดอร์ก่อนเสมอ:
+   **ผู้ใช้ที่สร้างบน DSM มัก uid ขึ้นต้นที่ 1024 ไม่ใช่ 1000** — โฟลเดอร์ที่สร้างผ่าน File Station/SSH
+   จึงมักไม่ใช่ของ uid 1000 ต้องโอนให้เอง ตรวจเจ้าของก่อนเสมอ:
    ```
-   ls -n /volume1/deposit-rate     # ดูคอลัมน์ uid/gid (ตัวเลข ไม่ใช่ชื่อ)
+   cd /volume1/bom321/Work/deposit-rate/docker/checkrate
+   ls -nd data      # ดูคอลัมน์ uid/gid (ตัวเลข ไม่ใช่ชื่อ)
    ```
    ถ้าไม่ใช่ `1000 1000` ให้ปรับด้วย (ผ่าน SSH, ต้องมีสิทธิ์ sudo/root):
    ```
-   sudo chown -R 1000:1000 /volume1/deposit-rate
+   sudo chown -R 1000:1000 data
    ```
+   อาการเมื่อลืมทำ: คอนเทนเนอร์ restart วนแล้ว `docker logs checkrate` ขึ้น
+   `[entrypoint] ❌ เขียน /data ไม่ได้ ...` (เจอจริง ส.ค. 2569 ตอนอัปเดตเป็นเวอร์ชันที่รัน non-root)
 
 ---
 
@@ -76,7 +82,8 @@
    SMTP_PASSWORD=xxxx xxxx xxxx xxxx      # App Password จากขั้นตอนที่ 1
    EMAIL_FROM=your_email@gmail.com
    EMAIL_TO=bom321@hotmail.com            # ผู้รับเริ่มต้น (แก้ภายหลังผ่านหน้าเว็บได้)
-   HOST_DATA_DIR=/volume1/deposit-rate    # ต้องตรงกับโฟลเดอร์ที่สร้างในขั้นตอนที่ 2
+   # ต้องตรงกับโฟลเดอร์ที่สร้างในขั้นตอนที่ 2 (path เต็มของโฟลเดอร์ข้อมูล ไม่ใช่โฟลเดอร์โปรเจกต์)
+   HOST_DATA_DIR=/volume1/bom321/Work/deposit-rate/docker/checkrate/data
    WEB_PORT=8080
    ADMIN_EMAILS=bom321@hotmail.com        # อีเมลที่มีสิทธิ์เข้า /config, /email, /logs และกดปุ่มรันตรวจสอบ
    ```
@@ -112,7 +119,7 @@ docker logs -f checkrate
 - **ภาพรวม** / **รายละเอียดธนาคาร** — เปิดดูได้ทุกคนโดยไม่ต้อง login
 - **จัดการอัตรา**, **Log & รัน** และปุ่มรันตรวจสอบ — ต้อง login ก่อน (ปุ่ม "เข้าสู่ระบบ" มุมขวาบน)
   กรอกอีเมลที่อยู่ใน `ADMIN_EMAILS` → รับรหัส OTP 6 หลักทางอีเมล (หมดอายุ 5 นาที) → กรอกรหัสเพื่อเข้าสู่ระบบ
-  session ค้างไว้ 30 วัน, ออกจากระบบได้ที่ปุ่ม "ออกจากระบบ"
+  session ค้างไว้ 7 วัน (ปรับได้ด้วย `SESSION_MAX_AGE_DAYS` ใน `.env`), ออกจากระบบได้ที่ปุ่ม "ออกจากระบบ"
 
 ---
 
@@ -171,7 +178,8 @@ sh /volume1/bom321/Work/deposit-rate/docker/checkrate/scripts/update.sh
 และไฟล์ `update.log` ในโฟลเดอร์โปรเจกต์
 
 **พฤติกรรมที่ควรรู้:**
-- ข้อมูลจริง (CSV/PDF/config ใน `HOST_DATA_DIR`) อยู่นอกโฟลเดอร์โปรเจกต์ — สคริปต์ไม่แตะเลย
+- ข้อมูลจริง (CSV/PDF/config ใน `HOST_DATA_DIR`) อยู่ในโฟลเดอร์ `data/` ของโปรเจกต์ แต่ `git pull`
+  ไม่แตะเพราะ `data/` อยู่ใน `.gitignore` (และไม่มีไฟล์ไหนใน `data/` ถูก track ไว้เลย)
 - ถ้ามีไฟล์ที่ถูกแก้ค้างไว้บน NAS (`git status` ไม่สะอาด) หรือโค้ดแตกสายจาก `origin/main` สคริปต์จะ
   **หยุดพร้อมบอกเหตุผล ไม่ทับของเดิม** ต้องเข้าไปเก็บกวาดเองก่อน
 - ถ้า build ผ่านแต่เว็บไม่ตอบใน 60 วิ จะ dump `docker logs` 30 บรรทัดล่าสุดลง log แล้ว exit ด้วย code 1

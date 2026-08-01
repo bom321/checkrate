@@ -15,5 +15,8 @@ services:
     ports:
       - "${WEB_PORT:-8080}:8080"
     volumes:
-      # host path ปรับได้ผ่าน HOST_DATA_DIR ใน .env (ค่าเริ่มต้น /volume1/checkrate — ตั้งเองก่อน deploy จริง)
-      - "${HOST_DATA_DIR:-/volume1/checkrate}:/data"
+      # host path ปรับได้ผ่าน HOST_DATA_DIR ใน .env — ค่าที่เขียนไว้ตรงนี้เป็นแค่ค่าสำรองเมื่อ .env ไม่ได้ตั้ง
+      # โฟลเดอร์ data/ อยู่ในโฟลเดอร์โปรเจกต์ได้อย่างปลอดภัย: มีทั้งใน .gitignore (git pull ไม่แตะ)
+      # และ .dockerignore (ไม่ถูกส่งเข้า build context) — **ห้ามตัด /data ท้าย path** ไม่งั้นจะ mount
+      # ทั้งโฟลเดอร์โปรเจกต์เข้าไปเป็น /data
+      - "${HOST_DATA_DIR:-/volume1/bom321/Work/deposit-rate/docker/checkrate/data}:/data"

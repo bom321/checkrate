@@ -3,6 +3,13 @@ services:
     build: .
     container_name: checkrate
     restart: unless-stopped
+    # uid:gid ที่ process ในคอนเทนเนอร์ใช้ — ทับ `USER app` (1000) ใน Dockerfile
+    # บนโฟลเดอร์แชร์ของ Synology ที่เปิด ACL ไว้ POSIX bits ที่ `ls` โชว์เป็นแค่ค่าประมาณ ตัวที่บังคับ
+    # ใช้จริงคือ ACL ซึ่งให้สิทธิ์เป็นราย "ผู้ใช้ DSM" (uid เริ่มที่ 1024) — `chown 1000` จึงไม่พอ
+    # ให้เขียน HOST_DATA_DIR ได้ ทางที่ได้ผลคือรันด้วย uid/gid ของผู้ใช้ DSM ที่เป็นเจ้าของโฟลเดอร์
+    # ดู uid/gid จริงด้วย `id <user>` บน NAS แล้วตั้ง PUID/PGID ใน .env
+    # (ไฟล์ใน image เปิด a+rX ไว้แล้ว รันข้าม uid ได้ ไม่ต้อง rebuild)
+    user: "${PUID:-1000}:${PGID:-1000}"
     security_opt:
       - "no-new-privileges:true"
     cap_drop:
@@ -12,8 +19,22 @@ services:
     environment:
       - TZ=Asia/Bangkok
       - DATA_DIR=/data
+    # ซ้ายคือพอร์ตฝั่ง host (เปลี่ยนได้ตามที่ NAS ว่าง) ขวาคือพอร์ตที่ uvicorn ฟังในคอนเทนเนอร์
+    # **ห้าม hardcode ฝั่งขวาเป็น 8080** — `env_file: .env` ส่ง WEB_PORT เข้าไปให้ entrypoint.sh
+    # ใช้สั่ง `uvicorn --port` ด้วย ตั้ง WEB_PORT=9000 แล้วฝั่งขวายังเป็น 8080 = publish ไปยังพอร์ตที่
+    # ไม่มีใครฟัง ได้ `Connection reset by peer` ซึ่งหน้าตาเหมือนเคสสิทธิ์ /data เป๊ะ ๆ (เสียเวลาไล่ผิดทาง)
     ports:
-      - "${WEB_PORT:-8080}:8080"
+      - "${HOST_WEB_PORT:-8080}:${WEB_PORT:-8080}"
+    # ไม่มี healthcheck = `docker ps` ขึ้น `Up` ตามปกติแม้ข้างในตายไปแล้ว และ restart loop ไม่มีใครเห็น
+    # ถ้าไม่ `docker inspect` เอง (เจอจริง ส.ค. 2569: RestartCount=26 โดย `docker ps` ยังดูปกติ)
+    # /api/health เป็น endpoint สาธารณะที่เบาที่สุด (ไม่ต้อง login ไม่ต้องเรนเดอร์ HTML) · image มี curl แล้ว
+    # CMD-SHELL เพื่อให้ compose interpolate ${WEB_PORT} ได้ (CMD แบบ list ไม่ผ่าน shell)
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:${WEB_PORT:-8080}/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
     volumes:
       # host path ปรับได้ผ่าน HOST_DATA_DIR ใน .env — ค่าที่เขียนไว้ตรงนี้เป็นแค่ค่าสำรองเมื่อ .env ไม่ได้ตั้ง
       # โฟลเดอร์ data/ อยู่ในโฟลเดอร์โปรเจกต์ได้อย่างปลอดภัย: มีทั้งใน .gitignore (git pull ไม่แตะ)

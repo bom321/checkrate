@@ -14,4 +14,7 @@ handover.md
 CLAUDE.md
 backup/
 Finance app redesign/
-scripts/
+# **ห้ามใส่ `scripts/` กลับเข้า ignore** — scripts/update.sh คือ deploy path หลักที่รันบน NAS จริง
+# ตอนที่มันถูก ignore ไว้ การแก้บน Mac ไม่ propagate ขึ้น NAS เลย (ต้อง copy มือทุกครั้ง จนไม่มีใครรู้
+# ว่าไฟล์บน NAS ตรงกับบน Mac ไหม) ถ้าจะเพิ่มสคริปต์ใหม่ในโฟลเดอร์นี้ ตรวจก่อนว่าไม่มี secret ฝังอยู่
+# — ค่าลับทั้งหมดต้องอ่านจาก .env ตอนรันเท่านั้น

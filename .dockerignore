@@ -1,4 +1,6 @@
 data/
+# สคริปต์ deploy รันบน host ไม่ได้อยู่ใน image (Dockerfile COPY แค่ app/, crontab, entrypoint.sh)
+scripts/
 .venv/
 .git/
 .env

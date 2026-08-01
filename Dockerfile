@@ -60,6 +60,9 @@ RUN useradd -u 1000 -m app && chown -R app:app /app
 USER app
 
 EXPOSE 8080
-VOLUME ["/data"]
+
+# **ห้ามใส่ `VOLUME ["/data"]` กลับมา** — compose bind mount HOST_DATA_DIR ทับอยู่แล้วจึงไม่มีประโยชน์
+# แต่ทำให้ `docker run` ตอน debug (ที่มักตั้งใจ debug เรื่อง mount พอดี) สร้าง anonymous volume เงียบ ๆ
+# ให้เขียนได้เสมอ = การทดสอบสิทธิ์เขียนผ่านทั้งที่ของจริงไม่ผ่าน
 
 ENTRYPOINT ["/app/entrypoint.sh"]

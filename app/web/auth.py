@@ -143,7 +143,7 @@ def verify_otp(email_raw: str, code_raw: str) -> bool:
             del _otp_store[email]
             return False
         entry["attempts"] += 1
-        if entry["hash"] != _hash_code(email, code):
+        if not secrets.compare_digest(entry["hash"], _hash_code(email, code)):
             return False
         del _otp_store[email]
         return True

@@ -3,6 +3,10 @@ services:
     build: .
     container_name: checkrate
     restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
     env_file:
       - .env
     environment:

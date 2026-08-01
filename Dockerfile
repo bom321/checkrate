@@ -39,6 +39,13 @@ COPY crontab ./crontab
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
+# รันเป็น non-root — เดิมไม่มี USER เลย บั๊กเขียนไฟล์ผิดพลาดใด ๆ จะเขียนทะลุถึง volume จริงบน NAS
+# ด้วยสิทธิ์ root uid 1000 = uid ของผู้ใช้แรกที่สร้างบน Synology DSM ตามปกติ — **ต้องตรวจ uid จริงของ
+# HOST_DATA_DIR ก่อน deploy จริงเสมอ** ด้วย `ls -n "$HOST_DATA_DIR"` ถ้าไม่ตรง container จะเขียน /data
+# ไม่ได้และแอปพังตอนบูต (entrypoint.sh เช็คสิทธิ์เขียน + แจ้งเตือนสาเหตุไว้ให้แล้ว ไม่ crash เงียบ ๆ)
+RUN useradd -u 1000 -m app && chown -R app:app /app
+USER app
+
 EXPOSE 8080
 VOLUME ["/data"]
 

@@ -25,6 +25,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import data_access as da
 from . import thaidate
 from . import auth
+from .. import version
 from ..monitor import common
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +58,12 @@ def _cookie_kwargs(env: dict | None = None) -> dict:
 
 
 app = FastAPI(title="CheckRate — Deposit Rate Dashboard")
+
+# บรรทัดแรกของ log ทุกครั้งที่เว็บบูต — ตอบ "คอนเทนเนอร์ที่รันอยู่เป็นโค้ดชุดไหน" ได้จาก log อย่างเดียว
+# โดยไม่ต้องเปิดเว็บ (deploy บน NAS แล้ว restart loop จะเห็นตรงนี้ก่อนใครเพื่อน)
+_build = version.build_info()
+common.log.info("CheckRate %s · แก้ไขล่าสุด %s · ที่มาของข้อมูลเวอร์ชัน: %s",
+                _build["label"], _build["date"] or "ไม่ทราบ", _build["source"])
 
 _cookie_kw = _cookie_kwargs()
 if not _cookie_kw["https_only"]:
@@ -102,7 +109,14 @@ def _is_safe_link(url: str | None) -> bool:
     return bool(url) and url.strip().lower().startswith(("http://", "https://"))
 
 
-templates = Jinja2Templates(directory=TEMPLATES_DIR, context_processors=[auth.auth_context])
+def _version_context(request: Request) -> dict:
+    """ส่ง build info เข้าทุก template — footer ของ base.html แสดงเวอร์ชัน + วันที่แก้ไขล่าสุด
+    (build_info() cache ไว้ทั้ง process แล้ว จึงไม่ยิง git ซ้ำทุก request)"""
+    return {"build": version.build_info()}
+
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR,
+                            context_processors=[auth.auth_context, _version_context])
 templates.env.filters.update(thaidate.FILTERS)   # thai_date / thai_month / thai_datetime ...
 templates.env.tests["safe_link"] = _is_safe_link
 auth.configure(templates)
@@ -1055,4 +1069,13 @@ def api_test_email():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "time": datetime.now().isoformat(timespec="seconds")}
+    b = version.build_info()
+    return {"status": "ok", "time": datetime.now().isoformat(timespec="seconds"),
+            "version": b["version"], "commit": b["commit"]}
+
+
+# สาธารณะโดยตั้งใจ — เป็นข้อมูลเดียวกับที่ footer ของทุกหน้าแสดงอยู่แล้ว และต้องยิงได้จากสคริปต์
+# deploy/monitor ภายนอกที่ไม่มี session (ใช้ยืนยันว่าคอนเทนเนอร์ที่รันอยู่เป็นโค้ดชุดใหม่จริง)
+@app.get("/api/version")
+def api_version():
+    return version.build_info()

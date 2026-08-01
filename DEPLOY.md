@@ -209,6 +209,29 @@ docker-compose up -d --build
 ขั้นที่ 4 คือด่านที่เพิ่มมาหลังเหตุการณ์ ส.ค. 2569 — deploy แล้วคอนเทนเนอร์เขียน `/data` ไม่ได้เพราะ
 Synology ACL กลายเป็น restart loop และเว็บดับยาว ตอนนี้เคสเดียวกันจะถูกจับตั้งแต่ก่อนแตะของที่รันอยู่
 
+### ป้ายเวอร์ชัน — ตรวจว่าเว็บที่รันอยู่เป็นโค้ดชุดไหน
+
+ตอน build สคริปต์จะ bake commit + วันที่ commit เข้า image (build args `APP_COMMIT`/`APP_BUILD_DATE`)
+แล้วหลัง deploy จะยิง `/api/version` เทียบให้เองว่า commit ที่เว็บรายงานตรงกับที่เพิ่ง build ไหม —
+ถ้าไม่ตรง จะขึ้น ⚠️ ใน log (อาการ "คอนเทนเนอร์เก่ายังรันอยู่โดยไม่มีใครรู้" เพราะ health check ผ่านเหมือนกัน)
+
+ดูเองได้ 3 ทาง:
+
+```bash
+curl -s http://<NAS-IP>:8080/api/version     # {"version":"1.0.0","commit":"a437a075","date":"...","source":"build"}
+docker logs checkrate | head -5              # บรรทัดแรกตอนบูต: CheckRate v1.0.0 (a437a075) · แก้ไขล่าสุด …
+```
+
+ทางที่สาม: **footer ของทุกหน้าเว็บ** — `CheckRate v1.0.0 a437a075` + `อัปเดตโค้ดล่าสุด <วันที่>`
+
+`source` บอกที่มาของเลข commit: `build` = ค่าที่ bake ตอน build (ถูกต้องเสมอบนเครื่องจริง) ·
+`git` = อ่านจาก `.git/` ตอนรันจากซอร์ส · `mtime` = ไม่มีทั้งสองอย่าง เหลือแค่วันที่แก้ไขไฟล์ล่าสุด
+(เจอ `mtime` บน NAS = build มาโดยไม่ผ่าน `scripts/update.sh` — build เองต้องส่งค่าให้ด้วย:
+`APP_COMMIT=$(git rev-parse --short=8 HEAD) APP_BUILD_DATE=$(git log -1 --format=%cI) docker-compose up -d --build`)
+
+เลข `version` (`1.0.0`) ตั้งด้วยมือที่ `VERSION` ใน `app/version.py` — bump ตอนออกเวอร์ชันใหม่ ส่วน
+commit/วันที่มาให้เองอัตโนมัติ ไม่ต้องแก้อะไร
+
 ```bash
 # ครั้งแรก (ถ้ายังไม่ได้ clone) — ติดตั้ง Git Server จาก Package Center ก่อนให้มีคำสั่ง git
 cd /volume1/bom321/Work/deposit-rate/docker

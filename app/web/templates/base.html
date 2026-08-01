@@ -30,8 +30,16 @@
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+  {# footer: เวอร์ชันของโค้ดชุดที่รันอยู่ + วันที่แก้ไขล่าสุด — ดู app/version.py ว่าค่ามาจากไหน
+     ป้ายเวอร์ชันพา commit ไปด้วยใน title (hover ดูได้) เอาไว้เทียบกับ git log ตอนสงสัยว่า deploy ติดไหม #}
   <footer class="footer">
-    CheckRate · เวลาเซิร์ฟเวอร์ {{ ''|default('') }}<span id="clock"></span>
+    <div class="footer-ver">
+      CheckRate
+      <span class="ver-pill" title="commit {{ build.commit or 'ไม่ทราบ' }} · ที่มา {{ build.source }}">v{{ build.version }}</span>
+      {% if build.commit %}<span class="ver-commit">{{ build.commit }}</span>{% endif %}
+      {% if build.dirty %}<span class="ver-dirty">มีไฟล์แก้ค้างไว้</span>{% endif %}
+    </div>
+    <div>อัปเดตโค้ดล่าสุด {{ build.date|thai_datetime_full }} · เวลาเซิร์ฟเวอร์ <span id="clock"></span></div>
   </footer>
 
   {# แถบเมนูล่างสำหรับมือถือ — ซ่อนบนจอใหญ่ (topbar ทำหน้าที่แทน) #}

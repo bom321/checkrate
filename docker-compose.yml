@@ -1,6 +1,14 @@
 services:
   checkrate:
-    build: .
+    build:
+      context: .
+      # ป้ายเวอร์ชันที่ bake เข้า image (ดู Dockerfile ท้ายไฟล์ + app/version.py)
+      # scripts/update.sh export ค่าทั้งสองตัวจาก git ให้ก่อนสั่ง build — build เองด้วยมือจะได้ค่าว่าง
+      # (แอปยังรันปกติ แค่ footer ไม่มี commit ให้ดู) เติมเองได้ด้วย:
+      #   APP_COMMIT=$(git rev-parse --short=8 HEAD) APP_BUILD_DATE=$(git log -1 --format=%cI) docker-compose build
+      args:
+        APP_COMMIT: "${APP_COMMIT:-}"
+        APP_BUILD_DATE: "${APP_BUILD_DATE:-}"
     container_name: checkrate
     restart: unless-stopped
     # uid:gid ที่ process ในคอนเทนเนอร์ใช้ — ทับ `USER app` (1000) ใน Dockerfile

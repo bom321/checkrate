@@ -145,6 +145,14 @@ if [ -n "$CUR_IMAGE_ID" ]; then
 fi
 
 # ── 4. build (ยังไม่แตะคอนเทนเนอร์ที่รันอยู่) ──
+# ป้ายเวอร์ชันที่ bake เข้า image — `.git/` ไม่ได้อยู่ใน image (dockerignore) แอปจึงถามหา commit เองไม่ได้
+# ต้องส่งจากตรงนี้เข้าไปทาง build args (docker-compose.yml → Dockerfile → env → app/version.py)
+# ค่าที่ได้ไปโผล่ที่ footer ของทุกหน้า + /api/version + log บรรทัดแรกตอนเว็บบูต
+APP_COMMIT="$($GIT rev-parse --short=8 HEAD)"
+APP_BUILD_DATE="$($GIT log -1 --format=%cI HEAD)"
+export APP_COMMIT APP_BUILD_DATE
+log "จะติดป้ายเวอร์ชันให้ image: ${APP_COMMIT} (${APP_BUILD_DATE})"
+
 log "กำลัง build image (อาจใช้เวลาหลายนาทีถ้า Dockerfile เปลี่ยน)…"
 $COMPOSE build >>"$LOG_FILE" 2>&1 || die "build ไม่สำเร็จ (ดูรายละเอียดใน ${LOG_FILE}) — ของเดิมยังรันอยู่ ไม่ได้แตะ"
 
@@ -187,6 +195,15 @@ while [ "$i" -lt "$HEALTH_RETRIES" ]; do
         STATE="$(docker inspect --format "$FMT" "$CONTAINER" 2>/dev/null || echo '(อ่านไม่ได้)')"
         log "✅ อัปเดตเสร็จ — เว็บตอบที่พอร์ต ${HOST_WEB_PORT} แล้ว"
         log "   สถานะคอนเทนเนอร์: ${STATE}"
+        # ยืนยันว่าเว็บที่ตอบอยู่คือโค้ดชุดใหม่จริง ไม่ใช่คอนเทนเนอร์เก่าที่ไม่ได้ recreate —
+        # เทียบ commit ที่เว็บรายงานกับ commit ที่เพิ่ง build ตรงนี้ที่เดียวจบ (เคสจริง ส.ค. 2569:
+        # ของเก่ายังรันอยู่โดยไม่มีใครรู้เพราะ health check ผ่านเหมือนกันทุกประการ)
+        RUNNING_VER="$(curl -fsS "http://127.0.0.1:${HOST_WEB_PORT}/api/version" 2>/dev/null || true)"
+        log "   เวอร์ชันที่เว็บรายงาน: ${RUNNING_VER:-(อ่านไม่ได้)}"
+        case "$RUNNING_VER" in
+            *"$APP_COMMIT"*) : ;;
+            *) log "   ⚠️ commit ที่เว็บรายงานไม่ตรงกับ ${APP_COMMIT} ที่เพิ่ง build — คอนเทนเนอร์อาจไม่ได้ถูก recreate" ;;
+        esac
         log "   (health=starting ได้ในนาทีแรก — start_period ของ healthcheck ตั้งไว้ 60 วิ)"
         docker image prune -f >/dev/null 2>&1 || true   # เก็บกวาด image เก่าที่ไม่มีใครอ้างถึง (ตัว :previous มี tag จึงรอด)
         exit 0

@@ -59,6 +59,17 @@ RUN chmod -R a+rX /app && chmod 0755 /app/entrypoint.sh
 RUN useradd -u 1000 -m app && chown -R app:app /app
 USER app
 
+# ── ป้ายเวอร์ชันของ image ── (อ่านโดย app/version.py → footer เว็บ + /api/version + log ตอนบูต)
+# `.git/` ไม่ได้ถูก COPY เข้า image (อยู่ใน .dockerignore) ในคอนเทนเนอร์จึงถามหา commit เองไม่ได้เลย
+# ต้อง bake เข้ามาตอน build — `scripts/update.sh` ส่งค่าจาก git ของ repo บน NAS ให้ผ่าน build args
+# (docker-compose.yml ต่อสายไว้แล้ว) build เองด้วยมือโดยไม่ส่งค่า = ไม่มี commit แสดง แต่แอปยังรันปกติ
+# **ต้องอยู่ท้าย Dockerfile เสมอ** — ค่าเปลี่ยนทุก commit ถ้าวางไว้ต้น ๆ จะทำให้ layer cache
+# ของ apt/pip ตกทุกครั้งที่ deploy (build นานขึ้นหลายนาทีโดยไม่จำเป็น)
+ARG APP_COMMIT=""
+ARG APP_BUILD_DATE=""
+ENV APP_COMMIT=$APP_COMMIT \
+    APP_BUILD_DATE=$APP_BUILD_DATE
+
 EXPOSE 8080
 
 # **ห้ามใส่ `VOLUME ["/data"]` กลับมา** — compose bind mount HOST_DATA_DIR ทับอยู่แล้วจึงไม่มีประโยชน์

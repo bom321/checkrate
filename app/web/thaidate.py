@@ -73,6 +73,19 @@ def thai_datetime(value) -> str:
     return f"{d.day:02d} {_MONTH_ABBR[d.month - 1]} {d:%H:%M} น."
 
 
+def thai_datetime_full(value) -> str:
+    """'2026-07-12T09:00:14+07:00' → '12 ก.ค. 2569 09:00 น.' (มีปีเต็ม — ใช้กับวันที่ของเวอร์ชัน
+    ที่อาจเก่าเป็นปี ต่างจาก thai_datetime ที่ใช้กับ 'ตรวจสอบล่าสุด' ซึ่งมักเป็นวันนี้)
+
+    รับสตริงที่มี timezone offset ได้ (git ให้วันที่มาแบบ %cI) — แสดงตามเวลาที่ติดมากับค่า ไม่แปลง zone
+    """
+    try:
+        d = datetime.fromisoformat(str(value).strip())
+    except (TypeError, ValueError):
+        return "-"
+    return f"{d.day:02d} {_MONTH_ABBR[d.month - 1]} {d.year + _BE_OFFSET} {d:%H:%M} น."
+
+
 FILTERS = {
     "thai_date": thai_date,
     "thai_date_full": thai_date_full,
@@ -80,4 +93,5 @@ FILTERS = {
     "thai_month_short": thai_month_short,
     "thai_year": thai_year,
     "thai_datetime": thai_datetime,
+    "thai_datetime_full": thai_datetime_full,
 }

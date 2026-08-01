@@ -855,19 +855,45 @@ def api_logs(level: str | None = None, bank: str | None = None, lines: int = 500
 
 
 # ─────────────────────────── Run trigger + status ───────────────────────────
+def _normalize_only(raw_only) -> tuple[list[str] | None, str | None]:
+    """แปลง only (str คั่นด้วย , / list / ค่าอื่น ๆ ที่หลวม) เป็น list[str] ของ code ที่มีอยู่จริงใน
+    banks_config.json เท่านั้น — ใช้ร่วมกันทุก endpoint ที่รับ only กัน 2 ปัญหาเดิม: (1) ",".join(only)
+    โยน TypeError ออกมาเป็น 500 ถ้า only ไม่ใช่ str และไม่ใช่ list (2) ไม่เคยเช็คว่า code ที่สั่งมามีจริง
+    ไหม เรียก rate_monitor --only ธนาคารที่ไม่มีอยู่แบบเงียบ ๆ
+
+    คืน (only_list, error) — only_list เป็น None ถ้าไม่ได้ระบุ only เลย (ความหมายเดิม: รันทุกธนาคาร)
+    error ไม่ใช่ None ถ้า client ส่ง only มาแต่ไม่เหลือ code ที่มีจริงสักตัวหลังกรอง (ผู้เรียกต้องตอบ 400)"""
+    if not raw_only:
+        return None, None
+    if isinstance(raw_only, str):
+        codes = [c.strip() for c in raw_only.split(",") if c.strip()]
+    elif isinstance(raw_only, list):
+        codes = [str(c).strip() for c in raw_only if str(c).strip()]
+    else:
+        codes = []
+    # เก็บ code ตามที่ config สะกดจริง (ไม่ใช่ตามที่ client ส่งมา) — da.get_bank() เทียบแบบ
+    # case-insensitive กันพลาดถ้า client ส่งตัวพิมพ์เล็ก/ใหญ่ปนกัน
+    valid = []
+    for c in codes:
+        bank = da.get_bank(c)
+        if bank is not None:
+            valid.append(bank["code"])
+    if not valid:
+        return None, "ไม่พบธนาคารที่ระบุใน only (ตรวจสอบว่า code สะกดถูกและมีอยู่ใน config)"
+    return valid, None
+
+
 @app.post("/api/run", dependencies=[Depends(auth.require_admin_api)])
 async def api_run(request: Request):
-    only = None
     try:
         body = await request.json()
-        only = (body or {}).get("only")
     except Exception:
-        only = None
+        body = {}
+    only, err = _normalize_only((body or {}).get("only"))
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
 
-    args = []
-    if only:
-        args = ["--only", only if isinstance(only, str) else ",".join(only)]
-
+    args = ["--only", ",".join(only)] if only else []
     if not _start_job(args, kind="run", only=only):
         return JSONResponse({"ok": False, "error": "มีงานกำลังรันอยู่แล้ว"}, status_code=409)
     return {"ok": True, "started": True}
@@ -887,10 +913,10 @@ async def _read_only_year(request: Request) -> tuple[str | list | None, int | No
     return only, (year if 2000 <= year <= 2100 else None)
 
 
-def _job_args(flag: str, only, year: int | None) -> list[str]:
+def _job_args(flag: str, only: list[str] | None, year: int | None) -> list[str]:
     args = [flag]
     if only:
-        args += ["--only", only if isinstance(only, str) else ",".join(only)]
+        args += ["--only", ",".join(only)]
     if year:
         args += ["--year", str(year)]
     return args
@@ -904,6 +930,9 @@ async def api_backfill(request: Request):
     CSV ที่ได้ยังครบทุกปีเสมอ
     """
     only, year = await _read_only_year(request)
+    only, err = _normalize_only(only)
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
     if not _start_job(_job_args("--backfill", only, year), kind="backfill", only=only):
         return JSONResponse({"ok": False, "error": "มีงานกำลังรันอยู่แล้ว"}, status_code=409)
     return {"ok": True, "started": True}
@@ -916,6 +945,9 @@ async def api_discover_year(request: Request):
     year (ไม่บังคับ) = ปีที่จะสแกน (ค่าเริ่มต้น = ปีปัจจุบัน)
     """
     only, year = await _read_only_year(request)
+    only, err = _normalize_only(only)
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
     if not _start_job(_job_args("--discover-year", only, year), kind="discover-year", only=only):
         return JSONResponse({"ok": False, "error": "มีงานกำลังรันอยู่แล้ว"}, status_code=409)
     return {"ok": True, "started": True}

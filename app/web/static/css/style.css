@@ -16,6 +16,9 @@
   --down-soft: #FBECE8;
   --warn: #B7791F;
   --warn-soft: #FBF1E8;
+  /* เทากลาง ๆ สำหรับป้ายที่ไม่ต้องการดึงสายตา (ป้ายเวอร์ชันบน footer) */
+  --neutral-ink: #5C5F66;
+  --neutral-soft: #E6E5E2;
   --topbar: #14151A;
   --hl: #FBF7EF;
   --hl-line: #E3C99B;
@@ -65,7 +68,7 @@ body {
 /* ป้ายเวอร์ชัน (base.html) — ข้อมูลมาจาก app/version.py ผ่าน context processor `build` */
 .footer-ver { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 4px; }
 .ver-pill {
-  font: 600 11px var(--mono); color: var(--brand-ink); background: var(--brand-soft);
+  font: 600 11.5px var(--sans); color: var(--neutral-ink); background: var(--neutral-soft);
   border-radius: 999px; padding: 2px 8px; cursor: default;
 }
 .ver-commit { font: 400 11px var(--mono); color: var(--muted-soft); }

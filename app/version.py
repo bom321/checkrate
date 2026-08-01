@@ -26,7 +26,8 @@ from datetime import datetime
 
 # ── เลขเวอร์ชันของแอป — แก้ที่นี่ที่เดียวตอนออกเวอร์ชันใหม่ ──
 # 1.0.0 = เวอร์ชันแรกที่เริ่มติดป้ายเวอร์ชัน (ส.ค. 2569) ระบบใช้งานจริงมาก่อนหน้านั้นแล้ว
-VERSION = "1.0.0"
+# 1.0.1 = ปรับหน้าตา footer (ข้อความ "ปรับปรุงล่าสุด" + ป้ายเวอร์ชันเป็นสีเทา ฟอนต์ sans)
+VERSION = "1.0.1"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

@@ -139,9 +139,13 @@ docker logs -f checkrate
 > **`Up` เฉย ๆ ยังไม่พอ** — คอนเทนเนอร์ที่ restart วนอยู่ก็ขึ้น `Up` ได้เหมือนกัน (เจอจริง ส.ค. 2569:
 > restart ไป 26 รอบโดย `docker ps` ดูปกติทุกอย่าง) เช็คให้ชัดด้วย:
 > ```bash
-> docker inspect checkrate --format '{{.State.Health.Status}} restarts={{.RestartCount}} user={{.Config.User}}'
-> # ที่ถูกต้อง: healthy restarts=0 user=<PUID>:<PGID>
+> docker inspect checkrate --format '{{if .State.Health}}health={{.State.Health.Status}} {{end}}restarts={{.RestartCount}} user={{.Config.User}}'
+> # ที่ถูกต้อง: health=healthy restarts=0 user=<PUID>:<PGID>
 > ```
+> ต้องมี `{{if .State.Health}}` ครอบเสมอ — ถ้าอ่าน `.State.Health.Status` ตรง ๆ กับคอนเทนเนอร์ที่
+> **ไม่มี** healthcheck จะได้ `template parsing error: map has no entry for key "Health"` แทนที่จะเป็น
+> ค่าว่าง และนั่นเองคือสัญญาณว่าคอนเทนเนอร์ตัวนี้ยังเป็นตัวเก่าที่สร้างก่อนมี healthcheck —
+> สั่ง `docker-compose up -d --build --force-recreate` เพื่อสร้างใหม่
 
 ---
 
@@ -261,7 +265,7 @@ sh /volume1/bom321/Work/deposit-rate/docker/checkrate/scripts/update.sh
 
 ```bash
 docker logs checkrate | tail -30
-docker inspect checkrate --format '{{.State.Health.Status}} restarts={{.RestartCount}}'
+docker inspect checkrate --format '{{if .State.Health}}health={{.State.Health.Status}} {{end}}restarts={{.RestartCount}}'
 ```
 - `[entrypoint] ❌ เขียน /data ไม่ได้` → เรื่องสิทธิ์ ดูขั้นตอนที่ 2 ข้อ 4 (ACL → ตั้ง `PUID`/`PGID`)
 - **การ "กลับไปรันเป็น root" ไม่ช่วย** — `cap_drop: ALL` ตัด `DAC_OVERRIDE` ทิ้ง uid 0 ที่ไม่มี

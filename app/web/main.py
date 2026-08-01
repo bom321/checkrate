@@ -66,13 +66,15 @@ if not _cookie_kw["https_only"]:
     )
 app.add_middleware(SessionMiddleware, secret_key=auth.session_secret(), **_cookie_kw)
 
-# CSP: 'unsafe-inline' ใน script-src/style-src เพราะ template ปัจจุบันมี inline <script> หลายก้อน
-# (base.html, bank_detail.html) และ inline style="" (~10 จุด) — รัดเป็น 'self' ล้วนได้ต้องย้าย
-# ออกไปเป็นไฟล์ static ก่อนทั้งหมด (ดู SEC-15) ตอนนี้ CSP ยังกัน script/style จากโดเมนอื่นได้เต็มที่
-# (defense-in-depth ของ SEC-01) แค่ inline ที่เขียนเองในโค้ดยังผ่าน — img-src เผื่อ data: ให้
+# CSP: script-src รัดเป็น 'self' ล้วนแล้ว (SEC-15) — inline <script> ทั้งหมด (base.html นาฬิกา footer,
+# bank_detail.html อัปโหลด PDF) ย้ายออกไปเป็น static/js/clock.js กับ static/js/upload.js หมดแล้ว
+# ยืนยันด้วย grep ว่าไม่มี <script> ไม่มี src เหลือ และไม่มี inline event handler (onclick= ฯลฯ) เลย
+# ทั้ง repo — ถ้าจะเพิ่ม inline script ใหม่ในอนาคต ต้องย้ายไปไฟล์ static แทนเสมอ ไม่งั้นโดน CSP บล็อก
+# style-src ยังคง 'unsafe-inline' ไว้ก่อน (inline style="" ~10 จุดในหลาย template ยังไม่ได้ย้าย —
+# ผลกระทบต่ำกว่า script-src มากเพราะเปลี่ยนแค่หน้าตา ไม่รันโค้ดได้) img-src เผื่อ data: ให้
 # background-image แบบ inline SVG ใน style.css, ไม่มี CDN ไหนเลย (ฟอนต์/โลโก้ self-host หมด)
 _CSP = ("default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "font-src 'self'; "

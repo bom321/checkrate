@@ -41,9 +41,30 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))  # .../CheckRate
 # (SCB/KTB หน่วง 6-8 วิ/request, KBANK probe รายวัน) เดิมตั้งไว้ 600 วิตายตัว จึงถูกฆ่ากลางคันบ่อย
 JOB_TIMEOUT_SEC = int(os.environ.get("MONITOR_JOB_TIMEOUT", "3600") or "3600")
 
+def _cookie_kwargs(env: dict | None = None) -> dict:
+    """แปลง env COOKIE_SECURE/SESSION_MAX_AGE_DAYS เป็น kwargs ของ SessionMiddleware — แยกเป็นฟังก์ชัน
+    บริสุทธิ์ (รับ env dict ได้ ไม่ใช่แค่ os.environ) เพื่อ unit test ได้โดยไม่ต้องสร้าง FastAPI app ใหม่
+    ทั้งตัว (ค่าที่ได้ถูก bake เข้า SessionMiddleware ตอน construct ครั้งเดียว เปลี่ยน env ทีหลังไม่มีผล)
+
+    COOKIE_SECURE ค่าเริ่มต้น 0 (dev/LAN ที่ไม่มี HTTPS พังทันทีถ้าบังคับ Secure — cookie จะไม่ถูกส่งเลย)
+    ต้องตั้งเป็น 1 เองถ้าเปิดผ่าน reverse proxy/Cloudflare Tunnel ที่มี HTTPS จริง ไม่งั้น session cookie
+    วิ่ง plaintext บน LAN ได้ตลอดอายุ cookie (เดิม 30 วัน — ลดเหลือ 7 วันเป็นค่าเริ่มต้นด้วย ปรับได้ผ่าน
+    SESSION_MAX_AGE_DAYS)"""
+    env = os.environ if env is None else env
+    secure = (env.get("COOKIE_SECURE", "0") or "0").strip().lower() in ("1", "true", "yes")
+    max_age_days = int(env.get("SESSION_MAX_AGE_DAYS", "7") or "7")
+    return {"max_age": max_age_days * 24 * 3600, "same_site": "lax", "https_only": secure}
+
+
 app = FastAPI(title="CheckRate — Deposit Rate Dashboard")
-app.add_middleware(SessionMiddleware, secret_key=auth.session_secret(),
-                    max_age=30 * 24 * 3600, same_site="lax")
+
+_cookie_kw = _cookie_kwargs()
+if not _cookie_kw["https_only"]:
+    common.log.warning(
+        "COOKIE_SECURE ไม่ได้เปิด — session cookie ไม่มี flag Secure วิ่ง plaintext ได้ถ้าเข้าเว็บผ่าน "
+        "HTTP ถ้าเปิดใช้งานผ่าน reverse proxy/Cloudflare Tunnel ที่มี HTTPS จริง ให้ตั้ง COOKIE_SECURE=1"
+    )
+app.add_middleware(SessionMiddleware, secret_key=auth.session_secret(), **_cookie_kw)
 
 # CSP: 'unsafe-inline' ใน script-src/style-src เพราะ template ปัจจุบันมี inline <script> หลายก้อน
 # (base.html, bank_detail.html) และ inline style="" (~10 จุด) — รัดเป็น 'self' ล้วนได้ต้องย้าย

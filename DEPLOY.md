@@ -203,3 +203,8 @@ sh /volume1/bom321/Work/deposit-rate/docker/checkrate/scripts/update.sh
   ผ่าน OTP เลย — ถ้าไม่ได้ตั้ง env จะมี log warning เตือนตอนคอนเทนเนอร์บูตทุกครั้ง อย่าง `HOST_DATA_DIR`
   เองก็ไม่ควรแชร์ผ่าน SMB ให้ทุกคนเข้าถึงได้ตามหลักการเดียวกัน
   เว็บนี้ไม่มี HTTPS ในสแตกนี้ (ไม่มี reverse proxy) — ถ้าเปิดใช้งานนอก LAN ที่เชื่อถือได้ ควรเพิ่ม HTTPS/reverse proxy เอง
+  **ถ้าเปิดผ่าน reverse proxy หรือ Cloudflare Tunnel ที่มี HTTPS จริงแล้ว ต้องตั้ง `COOKIE_SECURE=1`
+  ใน `.env` เสมอ** ไม่งั้น session cookie จะไม่มี flag `Secure` (วิ่ง plaintext ได้ถ้ามีใครดักที่ต้นทาง
+  ก่อนถึง proxy) — ค่าเริ่มต้น `COOKIE_SECURE=0` เจตนาให้ใช้งานบน LAN ธรรมดาได้โดยไม่ต้องตั้งอะไรเพิ่ม
+  (ตั้ง `1` ทั้งที่ยังไม่มี HTTPS จริง จะทำให้ login ไม่ได้เลยเพราะเบราว์เซอร์ไม่ส่ง cookie ที่มี flag
+  `Secure` ผ่าน HTTP)

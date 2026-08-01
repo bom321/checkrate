@@ -9,7 +9,8 @@ GET /api/config, /api/settings คืนทั้ง dict ออกไป จะ
 
 Flow: กรอกอีเมล (POST /login) → ถ้าอยู่ใน allowlist ส่งรหัส 6 หลักอายุ 5 นาทีทางอีเมล
 (ทุกกรณีตอบข้อความเดียวกัน กันเดาว่าอีเมลไหนมีสิทธิ์) → กรอกรหัส (POST /login/verify) →
-ได้ session cookie (เซ็นด้วย itsdangerous ผ่าน SessionMiddleware) อายุ 30 วัน
+ได้ session cookie (เซ็นด้วย itsdangerous ผ่าน SessionMiddleware) อายุ 7 วัน (ปรับได้ผ่าน env
+SESSION_MAX_AGE_DAYS — ตั้งค่าที่ main.py ตอนสร้าง SessionMiddleware)
 """
 
 import os, re, time, secrets, hashlib, threading

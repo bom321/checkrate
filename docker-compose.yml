@@ -15,5 +15,5 @@ services:
     ports:
       - "${WEB_PORT:-8080}:8080"
     volumes:
-      # host path ปรับได้ผ่าน HOST_DATA_DIR ใน .env (ค่าเริ่มต้น /volume1/deposit-rate)
-      - "${HOST_DATA_DIR:-/volume1/bom321/Work/deposit-rate/docker/checkrate}:/data"
+      # host path ปรับได้ผ่าน HOST_DATA_DIR ใน .env (ค่าเริ่มต้น /volume1/checkrate — ตั้งเองก่อน deploy จริง)
+      - "${HOST_DATA_DIR:-/volume1/checkrate}:/data"

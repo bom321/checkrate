@@ -58,4 +58,5 @@ def test_footer_แสดงเวอร์ชันในทุกหน้า(
     for path in ("/", "/login"):
         html = client.get(path).text
         assert f"v{version.VERSION}" in html
-        assert "อัปเดตโค้ดล่าสุด" in html
+        # ข้อความในป้ายเปลี่ยนเป็น "ปรับปรุงล่าสุด" ตั้งแต่คอมมิต 0cf3831 (base.html) — test ตกค้างอยู่
+        assert "ปรับปรุงล่าสุด" in html

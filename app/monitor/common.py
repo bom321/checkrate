@@ -16,13 +16,16 @@ CSV read/write, settings.json, result JSON (per-bank) และการส่�
   SMTP2_*        ชุด SMTP สำรอง (เช่น Synology MailPlus) — HOST/PORT/USER/PASSWORD/FROM ชื่อเดียวกับข้างบน
                  บวก SMTP2_INSECURE=1 เพื่อข้ามการตรวจสอบใบรับรอง TLS (self-signed) เลือกใช้งานผ่าน
                  settings.json คีย์ email_provider ("gmail" ค่าเริ่มต้น | "mailplus")
+  EMAIL_ATTACH_MAX_MB  เพดานขนาดไฟล์แนบต่อไฟล์ (MB, ค่าเริ่มต้น 15) — เกินแล้ว "ไม่แนบ" แต่ยังส่งอีเมลตามปกติ
 """
 
 import subprocess, io, re, csv, os, json, logging, logging.handlers, smtplib, ssl, html
 import contextlib, contextvars, hashlib
 from datetime import datetime
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 import pdfplumber
 
 # ─────────────────────────── Paths (env-based) ───────────────────────────
@@ -32,6 +35,11 @@ LOG_PATH      = os.path.join(OUTPUT_DIR, "rate_monitor.log")
 SETTINGS_PATH = os.path.join(OUTPUT_DIR, "settings.json")
 
 RATE_CHANGE_THRESHOLD = 0.5
+
+# เพดานขนาดไฟล์แนบต่อหนึ่งไฟล์ (MB) — PDF ประกาศปกติอยู่ที่ ~0.1-1.6MB (BBL เป็นภาพสแกนจึงใหญ่สุด)
+# แต่ผู้ให้บริการอีเมลบางเจ้าจำกัดขนาดทั้งฉบับไว้ต่ำ (MailPlus/Brevo ตั้งเพดานเองได้) — เกินเพดานนี้แล้ว
+# "ไม่แนบ" แต่ยังส่งอีเมลตามปกติเสมอ ไม่ยอมให้อีเมลแจ้งเตือนล้มเพราะไฟล์ใหญ่
+EMAIL_ATTACH_MAX_MB = float(os.environ.get("EMAIL_ATTACH_MAX_MB", "15") or "15")
 
 THAI_MONTHS = {
     "มกราคม": 1, "กุมภาพันธ์": 2, "มีนาคม": 3, "เมษายน": 4,
@@ -574,11 +582,43 @@ def _active_smtp_config() -> dict:
     }
 
 
-def send_email(subject: str, html_body: str, to: list[str] | None = None) -> bool:
+def attachment_fits(fname: str, size: int) -> bool:
+    """ไฟล์นี้แนบไปกับอีเมลได้ไหม (ไม่เกิน EMAIL_ATTACH_MAX_MB) — เกินแล้ว log.warning บอกเหตุผล
+
+    แยกออกมาเป็นฟังก์ชันสาธารณะเพราะผู้เรียก (run_bank) ต้อง **รู้คำตอบก่อนเขียนเนื้อความอีเมล**
+    เนื้อความจะได้ไม่โกหกว่า "แนบไฟล์มาด้วยแล้ว" ทั้งที่ไฟล์ถูกตัดทิ้งไป — send_email() เรียกซ้ำอีกชั้น
+    เป็น defense-in-depth เผื่อผู้เรียกรายอื่นลืมเช็ค (ในทางปฏิบัติจึงไม่ค่อยได้ทำงานจริง)
+    """
+    if size <= EMAIL_ATTACH_MAX_MB * 1024 * 1024:
+        return True
+    log.warning(f"ไม่แนบไฟล์ {fname} ไปกับอีเมล: ขนาด {size / 1048576:.1f} MB "
+                f"เกินเพดาน {EMAIL_ATTACH_MAX_MB:.0f} MB (EMAIL_ATTACH_MAX_MB) — ส่งอีเมลต่อโดยไม่มีไฟล์แนบ")
+    return False
+
+
+def send_email(subject: str, html_body: str, to: list[str] | None = None,
+               attachments: list[tuple[str, bytes]] | None = None) -> bool:
     """ส่งอีเมล HTML ผ่าน SMTP (SSL 465 หรือ STARTTLS 587) ใช้ชุด config ที่เลือกไว้ผ่าน
-    _active_smtp_config() (Gmail หรือ MailPlus) ไม่ส่ง `to` = ผู้รับตาม get_recipients() เดิม"""
+    _active_smtp_config() (Gmail หรือ MailPlus) ไม่ส่ง `to` = ผู้รับตาม get_recipients() เดิม
+
+    attachments — list ของ (ชื่อไฟล์, เนื้อไฟล์) ค่าเริ่มต้น None = ไม่มีไฟล์แนบ (พฤติกรรมเดิมเป๊ะ:
+    โครงข้อความยังเป็น multipart/alternative ชั้นเดียวเหมือนก่อนทุกตัวอักษร) มีไฟล์แนบเมื่อไหร่จึงห่อ
+    ด้วย multipart/mixed อีกชั้นตามมาตรฐาน ไฟล์ที่ใหญ่เกิน EMAIL_ATTACH_MAX_MB ถูกตัดทิ้งเงียบ ๆ
+    (มี log.warning) แต่อีเมลยังส่งตามปกติ — ห้ามให้อีเมลแจ้งเตือนล้มเพราะไฟล์แนบเด็ดขาด
+
+    **เกณฑ์ To / BCC** — ตัดสินจาก `to` อย่างเดียว:
+      • `to is None` = broadcast ตาม get_recipients() (แจ้งประกาศใหม่ / error / test) → ส่งแบบ **BCC**
+        คือใส่ที่อยู่ผู้ส่งเองในหัว To: แล้วไม่ใส่หัว Bcc: ลงในตัวข้อความ ผู้รับแต่ละคนจึงไม่เห็นอีเมล
+        ของคนอื่นในรายชื่อ (ผู้รับจริงเดินทางผ่าน envelope ของ SMTP ที่ to_addrs ข้างล่างเท่านั้น)
+      • ผู้เรียกระบุ `to` มาเอง = อีเมลถึงคนคนนั้นโดยเฉพาะ (เคสจริง: OTP login ใน web/auth.py) →
+        คง To: เป็นผู้รับคนนั้นเหมือนเดิม ถ้าไปซ่อนเป็น BCC ด้วย ผู้ใช้จะเห็นอีเมลรหัสของตัวเองเป็น
+        อีเมลที่ไม่ได้จ่าหน้าถึงตน ดูเหมือนสแปมทันที
+    """
     cfg = _active_smtp_config()
     host, port, user, password, sender = cfg["host"], cfg["port"], cfg["user"], cfg["password"], cfg["sender"]
+    # `not to` ไม่ใช่ `to is None` โดยเจตนา — บรรทัดถัดไป (ของเดิม) ให้ to=[] ตกไปใช้ get_recipients()
+    # เหมือนกัน จึงเป็น broadcast เหมือนกัน ต้องเป็น BCC ด้วย ไม่งั้นรายชื่อผู้รับหลุดออกไปในหัว To:
+    use_bcc = not to
     recipients = to or get_recipients()
 
     if not host or not user or not password:
@@ -589,11 +629,31 @@ def send_email(subject: str, html_body: str, to: list[str] | None = None) -> boo
         return False
 
     try:
-        msg = MIMEMultipart("alternative")
+        body = MIMEMultipart("alternative")
+        body.attach(MIMEText(html_body, "html", "utf-8"))
+
+        files = [(fn, data) for fn, data in (attachments or []) if attachment_fits(fn, len(data))]
+        if files:
+            # มีไฟล์แนบ → ต้องเป็น multipart/mixed ครอบ multipart/alternative (เนื้อความ) + ไฟล์แนบ
+            # ห้ามเอาไฟล์ไปแปะใน alternative ตรง ๆ เพราะ alternative แปลว่า "เนื้อหาเดียวกันหลายรูปแบบ"
+            # เมลไคลเอนต์จะเลือกแสดงอันเดียวแล้วทิ้งที่เหลือ ไฟล์แนบอาจหายไปทั้งดุ้น
+            msg = MIMEMultipart("mixed")
+            msg.attach(body)
+            for fn, data in files:
+                # ทุกวันนี้แนบแต่ PDF ประกาศ แต่ไม่ hardcode ชนิดไฟล์ไว้ — ประกาศ Content-Type ผิด
+                # ทำให้บางเมลไคลเอนต์เปิดไฟล์ด้วยโปรแกรมผิดตัว
+                sub = "pdf" if fn.lower().endswith(".pdf") else "octet-stream"
+                part = MIMEApplication(data, _subtype=sub)
+                part.add_header("Content-Disposition", "attachment", filename=fn)
+                msg.attach(part)
+        else:
+            msg = body  # ไม่มีไฟล์แนบ = โครงเดิมทุกประการ (OTP / error / test ต้องไม่เปลี่ยนรูป)
+
         msg["Subject"] = subject
         msg["From"] = sender
-        msg["To"] = ", ".join(recipients)
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        # หัว To: ที่ "ไม่เปิดเผยผู้รับ" — จ่าหน้าถึงตัวระบบเอง (ผู้รับจริงอยู่ใน envelope เท่านั้น)
+        msg["To"] = (formataddr(("ผู้รับตามรายชื่อของระบบ (ไม่เปิดเผย)", sender)) if use_bcc
+                     else ", ".join(recipients))
 
         # Gmail (ชุดเดิม): ctx=None ให้ smtplib ใช้ default ของมันเอง (behavior เดิมเป๊ะ ห้ามแตะ)
         # MailPlus: ต้องคุมเอง — ลำดับความสำคัญ CA_FILE > INSECURE > default
@@ -621,13 +681,64 @@ def send_email(subject: str, html_body: str, to: list[str] | None = None) -> boo
                 server.login(user, password)
                 server.send_message(msg, from_addr=sender, to_addrs=recipients)
 
-        log.info(f"Email sent ({cfg['label']}) → {', '.join(recipients)}  subject: {subject}")
+        # log อยู่ฝั่งเราเอง ไม่ได้เดินทางไปกับอีเมล จึงยังบอกรายชื่อผู้รับครบได้ (ต้องดูออกว่าใครได้รับบ้าง
+        # ตอนไล่ปัญหา) แต่ระบุด้วยว่าส่งแบบ bcc — กันสับสนว่าทำไมหัว To: ในกล่องจดหมายไม่ตรงกับ log
+        via = "bcc: " if use_bcc else ""
+        attached_note = f"  แนบ: {', '.join(fn for fn, _ in files)}" if files else ""
+        log.info(f"Email sent ({cfg['label']}) → {via}{', '.join(recipients)}"
+                 f"  subject: {subject}{attached_note}")
         return True
     except Exception as e:
         log.error(f"send_email failed ({cfg['label']}): {e}")
         return False
 
 # ─────────────────────────── Email Builders ───────────────────────────
+# อีเมลทุกฉบับเป็น "หนังสือแจ้ง" ภาษาไทยแบบเป็นทางการ (เรื่อง/เรียน/เนื้อหา/จึงเรียนมาเพื่อโปรดทราบ/ลงชื่อระบบ)
+# สไตล์ทั้งหมดเป็น inline CSS ล้วน — เมลไคลเอนต์ส่วนใหญ่ตัด <style> และ stylesheet ภายนอกทิ้ง และห้าม
+# อ้างอิงรูป/ฟอนต์จากภายนอกเด็ดขาด (โปรแกรมอีเมลบล็อกไว้เป็นค่าเริ่มต้นอยู่แล้ว + กลายเป็น tracking pixel
+# โดยปริยาย) ชื่อฟอนต์ที่ระบุไว้จึงเป็นแค่ family ที่ "ถ้าเครื่องผู้รับมีก็ใช้" ไม่ได้โหลดจากที่ไหน
+_EM_BODY = ("font-family:'Sarabun','Leelawadee UI',Tahoma,'Segoe UI',sans-serif;"
+            "font-size:15px;line-height:1.85;color:#1f2933;max-width:760px")
+_EM_TH   = ("padding:9px 14px;border-bottom:1px solid #d5dbe2;font-weight:600;"
+            "color:#334155;background:#eef2f6")
+_EM_TD   = "padding:9px 14px;border-bottom:1px solid #e5e9ee"
+_EM_NOTE = "margin:18px 0 0;font-size:12.5px;color:#6b7684;line-height:1.7"
+_EM_HEAD = ("margin:0 0 16px;font-size:18px;font-weight:600;line-height:1.5;color:#111827;"
+            "padding-bottom:12px;border-bottom:2px solid #e5e9ee")
+# ลงชื่อสั้น ๆ แทนคำลงท้ายแบบหนังสือราชการ ("จึงเรียนมาเพื่อโปรดทราบ / ขอแสดงความนับถือ") — ยังบอกว่า
+# ใครส่งและติดต่อกลับไม่ได้ ครบเท่าเดิม แต่ไม่ทำให้อีเมลที่ส่งอัตโนมัติทุกเดือนอ่านแล้วเกร็ง
+_EM_SIGN = ("<p style='margin:22px 0 0;color:#4b5563'>— "
+            "<strong>ระบบติดตามอัตราดอกเบี้ยเงินฝาก (CheckRate)</strong></p>")
+
+
+def _thai_date(iso: str) -> str:
+    """2026-06-18 → "18 มิถุนายน 2569" ใช้ในเนื้อความที่เป็นทางการเท่านั้น
+
+    รูปแบบที่แปลงไม่ได้คืนค่าเดิมกลับไปตรง ๆ (ไม่ throw — อีเมลแจ้งเตือนต้องไม่ล้มเพราะวันที่แปลก)
+    ส่วนหัวข้ออีเมลกับชื่อไฟล์ยังใช้ ISO เหมือนเดิม เพราะคนใช้ค้น/กรองอีเมลจากตรงนั้น
+    """
+    try:
+        d = datetime.strptime(str(iso), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return str(iso)
+    month = next((name for name, num in THAI_MONTHS.items() if num == d.month), "")
+    return f"{d.day} {month} {d.year + 543}".replace("  ", " ").strip()
+
+
+def _thai_datetime(iso_ts: str) -> str:
+    """2026-06-18T09:00:12 → "18 มิถุนายน 2569 เวลา 09:00:12 น."
+
+    แปลงส่วนวันที่ไม่ได้เมื่อไหร่ คืนค่าเดิมทั้งสตริง — ยอมให้หน้าตาไม่สวยดีกว่าตัดข้อมูลของ
+    timestamp ที่รูปแบบไม่คาดคิดทิ้งไป (อีเมล error คือที่ที่ต้องเชื่อถือข้อมูลดิบได้มากที่สุด)
+    """
+    s = str(iso_ts)
+    date_part, _, time_part = s.partition("T")
+    thai = _thai_date(date_part)
+    if thai == date_part:
+        return s
+    return f"{thai} เวลา {time_part} น." if time_part else thai
+
+
 def _fmt_rate(val, prev_val) -> tuple[str, str, str]:
     new_s = f"{val:.2f}%" if val is not None else "-"
     old_s = f"{prev_val:.2f}%" if prev_val is not None else "-"
@@ -637,44 +748,84 @@ def _fmt_rate(val, prev_val) -> tuple[str, str, str]:
 
 def build_new_rates_email(bank: dict, eff_date: str, prev_date: str | None,
                           rates: dict, prev_rates: dict | None, warnings: list[str],
-                          pdf_fname: str) -> tuple[str, str]:
+                          pdf_fname: str, attached: bool = False) -> tuple[str, str]:
+    """หนังสือแจ้งประกาศอัตราดอกเบี้ยฉบับใหม่ (คืน subject, html)
+
+    attached — ประกาศฉบับเต็มถูกแนบไปกับอีเมลฉบับนี้จริงหรือไม่ ผู้เรียก (run_bank) เป็นคนตัดสิน
+    ด้วย attachment_fits() แล้วบอกมา **ห้ามเดาเอง** เพราะไฟล์ที่ใหญ่เกินเพดานจะถูกตัดทิ้งโดยที่
+    อีเมลยังส่งออกไปตามปกติ — เขียนว่า "แนบมาด้วยแล้ว" ทั้งที่ไม่มีไฟล์ = หนังสือแจ้งที่ไม่ตรงความจริง
+    """
     # ค่าที่ยัดลง HTML ส่วนใหญ่มาจาก banks_config.json (bank['name']/t['label']) ซึ่งแก้ได้จากหน้า /config
     # (admin เท่านั้น) แต่ escape ไว้เป็น defense-in-depth เผื่อมีตัวอักษรพิเศษหลุดเข้ามา — ไม่ต้องเชื่อ
     # ว่า config สะอาดเสมอ
     esc = html.escape
-    subject = f"[{bank['code']}] อัตราดอกเบี้ยเงินฝากประจำ มีผลตั้งแต่ {eff_date}"
+    # หัวข้อ: **ต้องมีรหัสธนาคารในวงเล็บเหลี่ยมเสมอ** ผู้ใช้ตั้ง filter ในกล่องจดหมายจากตรงนี้ และ log
+    # ก็บันทึกหัวข้อไว้ทั้งบรรทัด — เปลี่ยนรูปแบบตรงนี้เท่ากับทำ filter ของผู้ใช้พังเงียบ ๆ
+    subject = f"[{bank['code']}] อัตราดอกเบี้ยเงินฝากใหม่ มีผล {eff_date}"
+
     rows_html = ""
-    for t in bank["rate_targets"]:
+    for i, t in enumerate(bank["rate_targets"]):
         k = t["key"]
         new_s, old_s, chg_s = _fmt_rate(rates.get(k), prev_rates.get(k) if prev_rates else None)
-        rows_html += (f"<tr><td>{esc(t['label'])}</td>"
-                      f"<td align='right'>{esc(new_s)}</td>"
-                      f"<td align='right'>{esc(old_s)}</td>"
-                      f"<td align='right'>{esc(chg_s)}</td></tr>\n")
+        stripe = "background:#fbfcfd" if i % 2 else ""
+        rows_html += (
+            f"<tr style='{stripe}'>"
+            f"<td style='{_EM_TD}'>{esc(t['label'])}</td>"
+            f"<td style='{_EM_TD};text-align:right;white-space:nowrap'>{esc(new_s)}</td>"
+            f"<td style='{_EM_TD};text-align:right;white-space:nowrap;color:#6b7684'>{esc(old_s)}</td>"
+            f"<td style='{_EM_TD};text-align:right;white-space:nowrap'>{esc(chg_s)}</td></tr>\n")
 
     warn_html = ""
     if warnings:
         # warnings รวม 2 ประเภท: เปลี่ยนแปลงเกิน threshold (check_warnings) และ target ที่อ่านค่าไม่ได้
         # (run_bank ส่วน 7) — หัวข้อจึงต้องเป็นกลาง ไม่เจาะจงแค่ "เปลี่ยนแปลงผิดปกติ" เหมือนเดิม
-        items = "".join(f"<li>{esc(w)}</li>" for w in warnings)
-        warn_html = (f"<p>⚠️ <strong>ข้อควรระวัง</strong><br>"
-                     f"กรุณาตรวจสอบข้อมูลจาก PDF ต้นฉบับก่อนใช้งาน<ul>{items}</ul></p>")
+        items = "".join(f"<li style='margin:2px 0'>{esc(w)}</li>" for w in warnings)
+        warn_html = (
+            f"<div style='margin:20px 0 0;padding:14px 18px;background:#fdf8ec;"
+            f"border-left:4px solid #d9a441'>"
+            f"<p style='margin:0 0 6px'><strong>ข้อควรระวัง</strong></p>"
+            f"<p style='margin:0'>รายการต่อไปนี้ควรเทียบกับประกาศฉบับเต็มของธนาคารก่อนนำไปใช้</p>"
+            f"<ul style='margin:8px 0 0;padding-left:22px'>{items}</ul></div>")
+
+    # ไม่มีประกาศฉบับก่อนหน้า (ธนาคารที่เพิ่งเริ่มเก็บข้อมูล) = ทั้งคอลัมน์ "อัตราเดิม" และ "เปลี่ยนแปลง"
+    # เป็นขีดทั้งตาราง — เนื้อความจึงต้องไม่พูดถึงการเปรียบเทียบ ไม่งั้นหนังสือแจ้งจะขัดกับตารางของตัวเอง
+    if prev_date:
+        prev_txt = (f"ประกาศฉบับก่อนหน้ามีผลตั้งแต่ {esc(_thai_date(prev_date))} "
+                    f"ด้านล่างเป็นอัตราที่ระบบติดตามไว้ พร้อมส่วนที่เปลี่ยนไปจากฉบับก่อน")
+    else:
+        prev_txt = ("นี่เป็นประกาศฉบับแรกเท่าที่ระบบเก็บไว้ ยังไม่มีฉบับก่อนหน้าให้เทียบ "
+                    "ช่องอัตราเดิมกับช่องเปลี่ยนแปลงจึงเป็นขีดทั้งตาราง")
+    csv_fname = f"{bank['code'].lower()}_deposit_rate.csv"
+    if attached:
+        attach_txt = (f"แนบไฟล์ประกาศฉบับเต็มมาด้วยแล้ว ({esc(pdf_fname)}) "
+                      f"ส่วนประวัติอัตราย้อนหลังอยู่ในไฟล์ {esc(csv_fname)}")
+    else:
+        attach_txt = (f"อีเมลนี้ไม่ได้แนบไฟล์ประกาศมาด้วย แต่ระบบเก็บไฟล์ไว้ในชื่อ {esc(pdf_fname)} "
+                      f"ส่วนประวัติอัตราย้อนหลังอยู่ในไฟล์ {esc(csv_fname)}")
 
     html_body = f"""
-<p>{esc(bank['name'])} ({esc(bank['code'])}) ประกาศอัตราดอกเบี้ยใหม่ มีผลตั้งแต่ <strong>{esc(eff_date)}</strong><br>
-(เปลี่ยนจากประกาศ {esc(prev_date) if prev_date else '-'})</p>
+<div style="{_EM_BODY}">
+  <p style="{_EM_HEAD}">{esc(bank['name'])} ({esc(bank['code'])}) ประกาศอัตราดอกเบี้ยเงินฝากใหม่
+  มีผลตั้งแต่ {esc(_thai_date(eff_date))}</p>
 
-<table border="1" cellpadding="6" cellspacing="0"
-       style="border-collapse:collapse;font-family:monospace;font-size:14px">
-  <tr style="background:#f0f0f0">
-    <th>ประเภท</th><th>อัตราใหม่</th><th>อัตราเก่า</th><th>เปลี่ยน</th>
-  </tr>
-  {rows_html}
-</table>
+  <p style="margin:0 0 14px">{prev_txt}</p>
+
+  <table cellpadding="0" cellspacing="0" role="presentation"
+         style="border-collapse:collapse;width:100%;font-size:14.5px;border:1px solid #d5dbe2">
+    <tr>
+      <th style="{_EM_TH};text-align:left">รายการอัตราดอกเบี้ย</th>
+      <th style="{_EM_TH};text-align:right">อัตราใหม่</th>
+      <th style="{_EM_TH};text-align:right">อัตราเดิม</th>
+      <th style="{_EM_TH};text-align:right">เปลี่ยนแปลง</th>
+    </tr>
+    {rows_html}
+  </table>
 {warn_html}
-<hr>
-<p style="font-size:12px;color:#888">📎 PDF: {esc(pdf_fname)}<br>
-📊 ประวัติ: {esc(bank['code'].lower())}_deposit_rate.csv</p>"""
+  <p style="margin:20px 0 0">{attach_txt}</p>
+  {_EM_SIGN}
+  <p style="{_EM_NOTE}">ส่งอัตโนมัติ ไม่ต้องตอบกลับ<br>
+  ตัวเลขทั้งหมดอ่านจากประกาศของธนาคารด้วยระบบอัตโนมัติ ถ้าไม่ตรงกับประกาศ ให้ยึดตามประกาศของธนาคาร</p>
+</div>"""
     return subject, html_body
 
 
@@ -682,15 +833,32 @@ def build_error_email(bank: dict, step: str, message: str, ts: str) -> tuple[str
     # message มักมาจาก str(exception) โดยตรง — ไม่ใช่ข้อความที่เขียนเองในโค้ดเสมอไป (เช่น pdfplumber
     # โยน exception ที่มีเนื้อหาจาก PDF ปนอยู่ได้) escape ให้หมดกันหลุดเป็น HTML/script จริง
     esc = html.escape
-    subject = f"[{bank['code']} ERROR] ระบบติดตามอัตราดอกเบี้ยเกิดข้อผิดพลาด {ts[:10]}"
+    # คง "ERROR" ไว้ในหัวข้อคู่กับรหัสธนาคาร — เป็นคำที่ผู้ใช้ตั้ง filter/ค้นหาไว้แล้ว
+    subject = f"[{bank['code']} ERROR] ตรวจสอบประกาศอัตราดอกเบี้ยไม่สำเร็จ {ts[:10]}"
+    rows = [("วันและเวลาที่ตรวจพบ", esc(_thai_datetime(ts))),
+            ("ขั้นตอนที่เกิดข้อผิดพลาด", esc(step)),
+            ("รายละเอียด", esc(message))]
+    rows_html = "".join(
+        f"<tr><td style='{_EM_TD};width:200px;color:#334155;background:#f7f9fb'>{k}</td>"
+        f"<td style='{_EM_TD}'>{v}</td></tr>" for k, v in rows)
     html_body = f"""
-<p>❌ <strong>พบข้อผิดพลาด — {esc(bank['name'])} ({esc(bank['code'])})</strong></p>
-<table cellpadding="6">
-  <tr><td><strong>วันที่รัน</strong></td><td>{esc(ts)}</td></tr>
-  <tr><td><strong>ขั้นตอนที่ล้มเหลว</strong></td><td>{esc(step)}</td></tr>
-  <tr><td><strong>รายละเอียด</strong></td><td>{esc(message)}</td></tr>
-</table>
-<p style="font-size:12px;color:#888">Log: {esc(LOG_PATH)}</p>"""
+<div style="{_EM_BODY}">
+  <p style="{_EM_HEAD}">ตรวจสอบประกาศของ{esc(bank['name'])} ({esc(bank['code'])}) ไม่สำเร็จ</p>
+
+  <p style="margin:0 0 14px">ระบบทำงานไม่จบขั้นตอน จึงยังไม่ได้ข้อมูลของธนาคารนี้ในรอบนี้
+  รายละเอียดของปัญหาเป็นดังนี้</p>
+
+  <table cellpadding="0" cellspacing="0" role="presentation"
+         style="border-collapse:collapse;width:100%;font-size:14.5px;border:1px solid #d5dbe2">
+    {rows_html}
+  </table>
+
+  <p style="margin:20px 0 0">ข้อมูลของธนาคารนี้จะยังเป็นค่าเดิมจนกว่าการตรวจสอบรอบถัดไปจะสำเร็จ
+  ดูรายละเอียดเพิ่มเติมได้จาก log ของระบบ</p>
+  {_EM_SIGN}
+  <p style="{_EM_NOTE}">ส่งอัตโนมัติ ไม่ต้องตอบกลับ<br>
+  ไฟล์ log: {esc(LOG_PATH)}</p>
+</div>"""
     return subject, html_body
 
 
@@ -702,15 +870,31 @@ def build_test_email() -> tuple[str, str]:
     ts = datetime.now().isoformat(timespec="seconds")
     provider_name = "MailPlus (Synology)" if cfg["provider"] == "mailplus" else "Gmail"
     recipients = ", ".join(get_recipients()) or "-"
-    subject = f"[TEST] ทดสอบระบบส่งอีเมล CheckRate {ts[:10]}"
+    subject = f"[TEST] ทดสอบส่งอีเมลของระบบ CheckRate {ts[:10]}"
+    rows = [("วันและเวลาที่ทดสอบ", esc(_thai_datetime(ts))),
+            ("ช่องทางส่งอีเมลที่ใช้งานอยู่", esc(provider_name)),
+            ("เซิร์ฟเวอร์ SMTP", f"{esc(cfg['host'] or '-')}:{esc(str(cfg['port']))}"),
+            ("ผู้ส่ง", esc(cfg['user'] or '-')),
+            ("ผู้รับตามรายชื่อของระบบ", esc(recipients))]
+    rows_html = "".join(
+        f"<tr><td style='{_EM_TD};width:240px;color:#334155;background:#f7f9fb'>{k}</td>"
+        f"<td style='{_EM_TD}'>{v}</td></tr>" for k, v in rows)
     html_body = f"""
-<p>✅ <strong>ทดสอบส่งอีเมลสำเร็จ</strong> — ระบบ CheckRate เชื่อมต่อ SMTP ได้เรียบร้อย</p>
-<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:14px">
-  <tr><td><strong>เวลา</strong></td><td>{esc(ts)}</td></tr>
-  <tr><td><strong>Provider</strong></td><td>{esc(provider_name)}</td></tr>
-  <tr><td><strong>SMTP host</strong></td><td>{esc(cfg['host'] or '-')}:{esc(str(cfg['port']))}</td></tr>
-  <tr><td><strong>ผู้ส่ง</strong></td><td>{esc(cfg['user'] or '-')}</td></tr>
-  <tr><td><strong>ผู้รับ</strong></td><td>{esc(recipients)}</td></tr>
-</table>
-<p style="font-size:12px;color:#888">อีเมลนี้ส่งจากปุ่ม "ทดสอบส่งอีเมล" หรือคำสั่ง <code>--test-email</code></p>"""
+<div style="{_EM_BODY}">
+  <p style="{_EM_HEAD}">ทดสอบส่งอีเมลสำเร็จ</p>
+
+  <p style="margin:0 0 14px">ระบบเชื่อมต่อเซิร์ฟเวอร์อีเมลและส่งได้ตามปกติ
+  ค่าที่ใช้ส่งจริงในครั้งนี้เป็นดังนี้</p>
+
+  <table cellpadding="0" cellspacing="0" role="presentation"
+         style="border-collapse:collapse;width:100%;font-size:14.5px;border:1px solid #d5dbe2">
+    {rows_html}
+  </table>
+
+  <p style="margin:20px 0 0">อีเมลฉบับนี้มาถึง = อีเมลแจ้งประกาศอัตราดอกเบี้ยใหม่จะถึงผู้รับตามรายชื่อ
+  ข้างต้นได้เช่นกัน</p>
+  {_EM_SIGN}
+  <p style="{_EM_NOTE}">ส่งจากปุ่ม &ldquo;ทดสอบส่งอีเมล&rdquo; บนหน้าเว็บ หรือคำสั่ง
+  <code>--test-email</code> ไม่ต้องตอบกลับ</p>
+</div>"""
     return subject, html_body

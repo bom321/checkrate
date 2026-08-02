@@ -862,9 +862,46 @@ select:disabled { background-image: none; cursor: not-allowed; }
 
 
 /* ══════════════ Bank detail (mockup 7a–7d) ══════════════ */
+
+/* ── บันไดขนาดตัวอักษรของหน้านี้ ──
+   เดิมขนาดกระจายกันอยู่ 10.5/11/12/12.5/13 ปนกันโดยไม่มีเกณฑ์ (ป้ายที่ทำหน้าที่เดียวกัน เช่น
+   .bd-side-foot 10.5 กับ .bd-trend-rangeinfo 11 กลับคนละขนาด) และ "หัวข้อ" กับ "เนื้อหา" ไม่ได้ขยับ
+   ไปด้วยกันเวลาจอแคบลง — .bd-name กระโดด 26 → 21 ทีเดียวที่ 720px ส่วนตัวเล็กทั้งหมดค้างอยู่ขนาด
+   เดสก์ท็อปทุกความกว้าง หน้าจึงดู "ไม่เป็นสเกลเดียวกัน" ตรงช่วงแท็บเล็ต
+
+   ทางแก้: นิยามบันได 6 ขั้นตามบทบาท แล้วให้ทุกคลาส .bd-* อ้างตัวแปรแทนการเขียนเลขเอง
+   ปรับสเกลทั้งหน้าพร้อมกันได้จากที่เดียว (ค่าใน media query ด้านล่าง) ไม่ต้องไล่แก้ทีละคลาสอีก
+
+     --bd-fs-title  ชื่อธนาคาร (หัวข้อใหญ่สุดของหน้า)      26 → 21 แบบไล่ระดับ
+     --bd-fs-lead   ประโยคสรุปเดือนนี้ (.bd-hero, มือถือ)   22 → 18.5 แบบไล่ระดับ
+     --bd-fs-head   หัวข้อย่อย/ชื่อรายการ                   13
+     --bd-fs-body   เนื้อความ + ข้อมูลในตาราง               12.5
+     --bd-fs-label  ป้ายกำกับ/ตัวควบคุมเล็ก (ชิป/select)    11.5
+     --bd-fs-micro  meta เล็กสุด (หัวคอลัมน์/เชิงอรรถ)      11
+
+   ขั้น "หัวการ์ด" (15px) ไม่ได้อยู่ในบันไดนี้ตั้งใจ — มาจาก .ov-panel-title ที่ใช้ร่วมกับหน้าภาพรวม
+   แก้ที่นั่นจะไหลไปอีกหน้าด้วย ส่วนไอคอน/ลูกศร (.year-chevron, ↗ ใน .bd-file a) ไม่นับเป็นข้อความ
+   จึงคงขนาดเดิมไว้ ไม่ผูกกับบันได
+
+   ประกาศไว้ที่ :root ได้เพราะ **ตัวแปรชุดนี้ถูกอ้างเฉพาะในกฎที่ขึ้นต้นด้วย .bd- เท่านั้น** — หน้าอื่น
+   ที่ใช้คลาส .ov-* ร่วมกัน (.ov-kpi*, .ov-grid, .ov-row, .ov-months …) ไม่ได้อ้างตัวแปรเหล่านี้
+   จึงไม่มีทางไหลข้ามหน้า ถ้าต้องปรับตัวอักษรของ .ov-* เฉพาะหน้านี้ ให้ scope ด้วย .bd-rows เสมอ
+
+   title/lead ใช้ clamp() เพราะเป็นสองตัวที่กระโดดแรงที่สุด — ปลายทางล็อกไว้ตรงกับค่าที่ยืนยันแล้ว
+   ของดีไซน์เดิม (title: 26px ที่ container เต็ม 1160px → 21px ที่ 720px · lead: 22px → 20px ที่ 720px)
+   สูตร slope คิดจากสองจุดนั้นตรง ๆ ไม่ได้ตั้งเลขใหม่ลอย ๆ */
+:root {
+  --bd-fs-title: clamp(21px, 12.8px + 1.14vw, 26px);
+  --bd-fs-lead:  clamp(18.5px, 16px + .6vw, 22px);
+  --bd-fs-head:  13px;
+  --bd-fs-body:  12.5px;
+  --bd-fs-label: 11.5px;
+  --bd-fs-micro: 11px;
+}
+
 .bd-crumb {
   display: flex; align-items: center; gap: 7px; margin-bottom: 20px;
-  font-size: 12.5px; font-weight: 500; color: var(--muted-soft);
+  font-size: var(--bd-fs-body); font-weight: 500; color: var(--muted-soft);
 }
 .bd-crumb a { color: var(--muted); text-decoration: none; }
 .bd-crumb a:hover { color: var(--brand); }
@@ -884,13 +921,16 @@ select:disabled { background-image: none; cursor: not-allowed; }
   display: flex; align-items: center; justify-content: center;
   font: 600 22px var(--sans); color: var(--muted);
 }
-.bd-name { font-size: 26px; font-weight: 600; letter-spacing: -.01em; line-height: 1.25; }
-.bd-meta { margin-top: 3px; font: 400 12.5px var(--sans); color: var(--muted-soft); letter-spacing: .02em; }
+/* line-height 1.25 → 1.3: ชื่อธนาคารไทยยาว ๆ ตกบรรทัดที่สองบนจอแคบ สระบน/วรรณยุกต์กับสระล่างของ
+   สองบรรทัดเกือบชนกันที่ 1.25 (จอกว้างเป็นบรรทัดเดียวอยู่แล้ว ค่านี้ไม่มีผลกับหน้าตาเดสก์ท็อป) */
+.bd-name { font-size: var(--bd-fs-title); font-weight: 600; letter-spacing: -.01em; line-height: 1.3; }
+.bd-meta { margin-top: 3px; font: 400 var(--bd-fs-body)/1.5 var(--sans); color: var(--muted-soft); letter-spacing: .02em; }
 .bd-meta b { color: var(--down); font-weight: 600; }
 
-/* ประโยคสรุปเดือนนี้ — โชว์เฉพาะมือถือ (บน desktop ใช้ KPI การ์ดแทน) */
+/* ประโยคสรุปเดือนนี้ — โชว์เฉพาะมือถือ (บน desktop ใช้ KPI การ์ดแทน)
+   line-height 1.35 → 1.4: ประโยคนี้ตกบรรทัดที่สอง/สามเสมอบนมือถือ (เหตุผลเดียวกับ .bd-name) */
 .bd-hero {
-  display: none; font: 300 22px/1.35 var(--sans); color: var(--ink); letter-spacing: -.01em;
+  display: none; font: 300 var(--bd-fs-lead)/1.4 var(--sans); color: var(--ink); letter-spacing: -.01em;
   margin: 4px 0 20px;
 }
 .bd-hero b { font-weight: 600; }
@@ -901,16 +941,16 @@ select:disabled { background-image: none; cursor: not-allowed; }
    เส้น/แกน/ป้าย/tooltip และรายการในแผงขวา สร้างจาก detail.js ทั้งหมด */
 .bd-trend { margin-bottom: 14px; }
 .bd-trend-head { align-items: flex-start; padding: 16px 22px; }
-.bd-trend-sub { font-size: 12.5px; font-weight: 400; color: var(--muted-soft); margin-top: 2px; }
+.bd-trend-sub { font-size: var(--bd-fs-body); font-weight: 400; color: var(--muted-soft); margin-top: 2px; }
 .bd-trend-tools { display: flex; align-items: center; gap: 8px; }
-.bd-trend-badge { font-size: 12.5px; font-weight: 500; padding: 6px 12px; border-radius: 20px; white-space: nowrap; }
+.bd-trend-badge { font-size: var(--bd-fs-body); font-weight: 500; padding: 6px 12px; border-radius: 20px; white-space: nowrap; }
 .bd-trend-badge.down { background: var(--down-soft); color: var(--down); }
 .bd-trend-badge.up { background: var(--brand-soft); color: var(--brand); }
 .bd-trend-badge.mixed { background: var(--warn-soft); color: var(--warn); }
 #trend-download { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /* ตัวเลือกรูปแบบข้อมูล (รายวัน/เฉพาะการเปลี่ยนแปลง) — วางหน้าปุ่มดาวน์โหลดตามดีไซน์ */
 #trend-dl-mode {
-  font: 500 11.5px var(--sans); padding: 8px 10px; border-radius: 9px;
+  font: 500 var(--bd-fs-label) var(--sans); padding: 8px 10px; border-radius: 9px;
   border: 1px solid #DAD7D0; background: var(--card); color: #3C3F45;
 }
 
@@ -921,7 +961,7 @@ select:disabled { background-image: none; cursor: not-allowed; }
 .bd-trend-svg { width: 100%; height: 100%; display: block; font-family: var(--sans); }
 .bd-trend-empty {
   position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center;
-  font-size: 13px; color: var(--muted-soft); text-align: center; padding: 0 24px;
+  font-size: var(--bd-fs-head); color: var(--muted-soft); text-align: center; padding: 0 24px;
 }
 /* ต้องระบุเอง — .bd-trend-empty{display:flex} ชนะ [hidden]{display:none} ของ UA stylesheet */
 .bd-trend-empty[hidden] { display: none; }
@@ -931,13 +971,13 @@ select:disabled { background-image: none; cursor: not-allowed; }
   border-top: 1px solid #F0EDE7; padding: 9px 18px;
 }
 .bd-trend-range button {
-  font: 500 12.5px var(--sans); padding: 6px 12px; border-radius: 8px;
+  font: 500 var(--bd-fs-body) var(--sans); padding: 6px 12px; border-radius: 8px;
   border: none; background: none; color: #6E7178; cursor: pointer;
 }
 .bd-trend-range button:hover:not(:disabled) { background: var(--surface); }
 .bd-trend-range button.on { font-weight: 600; background: var(--ink); color: #fff; }
 .bd-trend-range button:disabled { opacity: .4; cursor: default; }
-.bd-trend-rangeinfo { margin-left: auto; font-size: 11px; color: var(--muted-soft); letter-spacing: .02em; }
+.bd-trend-rangeinfo { margin-left: auto; font-size: var(--bd-fs-micro); color: var(--muted-soft); letter-spacing: .02em; }
 
 /* ── แผงขวา: เลือกว่าจะให้เส้นไหนขึ้นกราฟ ── */
 .bd-trend-side { display: flex; flex-direction: column; height: 480px; min-width: 0; }
@@ -945,11 +985,13 @@ select:disabled { background-image: none; cursor: not-allowed; }
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 14px 16px 9px;
 }
-.bd-side-title { font-size: 12.5px; font-weight: 600; }
+/* 12.5 → ขั้น head เท่ากับ .bd-side-name: หัวแผงกับชื่อรายการในแผงเดียวกันเคยต่างกัน .5px
+   ซึ่งอ่านไม่ออกว่าตั้งใจ — ให้เป็นขั้นเดียวกันแล้วแยกลำดับชั้นด้วยตำแหน่ง/เส้นคั่นแทน */
+.bd-side-title { font-size: var(--bd-fs-head); font-weight: 600; }
 .bd-side-frac { font-weight: 400; color: var(--muted); }
 .bd-side-clear {
   border: none; background: none; padding: 2px 4px; margin: -2px -4px; border-radius: 6px;
-  font: 500 11px var(--sans); color: #2B6CB0; cursor: pointer;
+  font: 500 var(--bd-fs-label) var(--sans); color: #2B6CB0; cursor: pointer;
 }
 .bd-side-clear:hover:not(:disabled) { background: var(--surface); }
 .bd-side-clear:disabled { color: var(--muted-soft); cursor: default; }
@@ -958,8 +1000,10 @@ select:disabled { background-image: none; cursor: not-allowed; }
   padding: 0 15px 10px; border-bottom: 1px solid #F0EDE7;
 }
 .bd-side-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+/* 10.5 → ขั้น label เท่ากับช่อง "เรียง" ที่อยู่แถวเดียวกัน (เดิมเป็นตัวควบคุมคู่กันแต่คนละขนาด)
+   ชิปกรองล้นบรรทัดอยู่แล้วตามคอมเมนต์ด้านล่าง การขึ้น 1px จึงไม่เปลี่ยนโครงแถว */
 .bd-side-chips button {
-  font: 500 10.5px var(--sans); padding: 5px 10px; border-radius: 20px;
+  font: 500 var(--bd-fs-label) var(--sans); padding: 5px 10px; border-radius: 20px;
   border: none; background: #ECEAE4; color: #5C5F65; cursor: pointer;
 }
 /* ชิปที่ยังไม่เลือกใช้สีอ่อนของประเภทผู้ฝากเดียวกับ .pill-dep — ที่เลือกอยู่กลับเป็นดำทึบ */
@@ -970,9 +1014,9 @@ select:disabled { background-image: none; cursor: not-allowed; }
 .bd-side-chips button.on { font-weight: 600; background: var(--ink); color: #fff; }
 /* ไม่ดัน margin-left:auto — แผงกว้าง 340px ชิปกรองมักล้นบรรทัดอยู่แล้ว ถ้าดันชิดขวาช่องเรียงจะตกไป
    กินอีกบรรทัดของตัวเอง เบียดพื้นที่รายการอัตราให้เลื่อนมากขึ้นโดยไม่จำเป็น */
-.bd-side-sort { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted); }
+.bd-side-sort { display: flex; align-items: center; gap: 5px; font-size: var(--bd-fs-label); color: var(--muted); }
 .bd-side-sort select {
-  width: auto; font: 500 10.5px var(--sans); padding: 5px 22px 5px 9px;
+  width: auto; font: 500 var(--bd-fs-label) var(--sans); padding: 5px 22px 5px 9px;
   border-radius: 8px; border: 1px solid var(--line-strong); color: #5C5F65; background-color: var(--card);
 }
 .bd-side-list {
@@ -1001,18 +1045,18 @@ select:disabled { background-image: none; cursor: not-allowed; }
 .bd-side-top .pill-dep { flex: none; }
 .bd-side-name {
   display: block; flex: 1 1 auto; min-width: 0;
-  font: 600 13px var(--sans); color: var(--ink); line-height: 1.35;
+  font: 600 var(--bd-fs-head)/1.35 var(--sans); color: var(--ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .bd-side-item.off .bd-side-name { color: #8A8D93; }
 .bd-side-sub {
-  display: block; font: 400 11px var(--sans); color: #9B9EA4; margin-top: 2px;
+  display: block; font: 400 var(--bd-fs-micro)/1.45 var(--sans); color: #9B9EA4; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.bd-side-empty { padding: 16px 8px; font-size: 12px; color: var(--muted-soft); text-align: center; }
+.bd-side-empty { padding: 16px 8px; font-size: var(--bd-fs-body); color: var(--muted-soft); text-align: center; }
 .bd-side-foot {
   border-top: 1px solid #F0EDE7; padding: 10px 16px;
-  font: 400 10.5px/1.5 var(--sans); color: var(--muted-soft);
+  font: 400 var(--bd-fs-micro)/1.5 var(--sans); color: var(--muted-soft);
 }
 
 /* จอแคบกว่า ~1080px แผงขวาบีบกราฟจนอ่านไม่ออก — วางแผงลงมาใต้กราฟแทน (ยังเป็นเดสก์ท็อป) */
@@ -1020,6 +1064,24 @@ select:disabled { background-image: none; cursor: not-allowed; }
   .bd-trend-main { grid-template-columns: minmax(0, 1fr); }
   .bd-trend-plot { border-right: none; height: 400px; }
   .bd-trend-side { height: auto; max-height: 340px; border-top: 1px solid #F0EDE7; }
+
+  /* ── ขั้นกลางของบันไดขนาด (แท็บเล็ต) ──
+     จุดนี้คือจุดที่ layout เปลี่ยนจริง (แผงขวาลงมาอยู่ใต้กราฟ) ทุกอย่างกลายเป็นคอลัมน์เดียว
+     บรรทัดสั้นลง กล่องหัวการ์ดเริ่มแน่น — เดิมตัวอักษรทั้งหน้ายังเป็นขนาดเดสก์ท็อปจนถึง 720px
+     แล้วค่อยกระโดดทีเดียว ที่นี่จึงย่อบันไดลงหนึ่งขั้นพร้อมกันทั้งหน้า (title/lead ไล่ระดับเองด้วย
+     clamp อยู่แล้ว: 25.1px ที่ 1080 → 23.1px ที่ 900 → 21px ที่ 720)
+
+     label กับ micro ยุบมาเป็นค่าเดียวกัน (11px) ตั้งใจ — สองขั้นนี้แยกกันเพื่อไล่ลำดับชั้นภายใน
+     แผงขวา 340px ซึ่งไม่มีอยู่แล้วในความกว้างนี้ และไทยที่มีสระบน-ล่างซ้อนกันอ่านยากมากต่ำกว่า 11px
+     บนจอเล็ก ลำดับชั้นที่หายไปแทนด้วยน้ำหนัก/สีที่แต่ละคลาสมีอยู่เดิม
+     ค่าชุดนี้ไหลต่อไปถึงมือถือ (≤720/≤420) ด้วย — มือถือเดิมก็ต่ำกว่าเดสก์ท็อปหนึ่งขั้นอยู่แล้ว
+     (.bd-file .name 11 · วันที่ 12) แค่ไม่เคยเขียนเป็นกฎ ตอนนี้เป็นกฎเดียวกันทั้งหน้า */
+  :root {
+    --bd-fs-head:  12.5px;
+    --bd-fs-body:  12px;
+    --bd-fs-label: 11px;
+    --bd-fs-micro: 11px;
+  }
 }
 
 /* toolbar ของธนาคารนี้ — status pill ชิดขวาเสมอ · ปุ่มรอง (เติมข้อมูลย้อนหลัง / ค้นหาประวัติทั้งปี /
@@ -1033,13 +1095,13 @@ select:disabled { background-image: none; cursor: not-allowed; }
 }
 .toolbar .btn.btn-icon .btn-txt { display: none; }
 
-.bd-files-count { font-size: 12px; color: var(--muted-soft); }
+.bd-files-count { font-size: var(--bd-fs-label); color: var(--muted-soft); }
 .bd-year { border-top: 1px solid var(--line); }
 .bd-year:first-of-type { border-top: none; }
 .bd-year > summary {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 22px; background: #FBFAF8; cursor: pointer; user-select: none;
-  list-style: none; font-size: 13px; font-weight: 600;
+  list-style: none; font-size: var(--bd-fs-head); font-weight: 600;
 }
 .bd-year > summary::-webkit-details-marker { display: none; }
 .bd-year > summary:hover { background: var(--surface); }
@@ -1049,13 +1111,15 @@ select:disabled { background-image: none; cursor: not-allowed; }
 
 .bd-file {
   display: grid; grid-template-columns: 1fr 2.4fr 1fr .5fr; gap: 14px; align-items: center;
-  padding: 11px 22px; border-bottom: 1px solid #F5F2EC; font-size: 12.5px; color: #5C5F65;
+  padding: 11px 22px; border-bottom: 1px solid #F5F2EC; font-size: var(--bd-fs-body); color: #5C5F65;
 }
 /* บน desktop wrapper นี้ "หายไป" จาก box model — ลูกทั้ง 3 (วันที่/ชื่อ/ขนาด) เข้า grid 4 คอลัมน์ของ .bd-file ตรง ๆ เหมือนเดิม */
 .bd-file-info { display: contents; }
 .bd-file:last-child { border-bottom: none; }
-.bd-file-head { font-size: 10.5px; font-weight: 600; color: var(--muted-soft); padding: 9px 22px; }
-.bd-file .name { color: var(--ink); font-family: var(--sans); font-size: 12px; word-break: break-all; }
+.bd-file-head { font-size: var(--bd-fs-micro); font-weight: 600; color: var(--muted-soft); padding: 9px 22px; }
+/* ชื่อไฟล์ต่ำกว่าคอลัมน์วันที่/ขนาดหนึ่งขั้นตั้งใจ — เป็นสตริง ASCII ยาวที่ break-all ได้ ไม่ใช่ข้อความ
+   ที่ต้องอ่านเป็นประโยค ให้กินความกว้างน้อยลงและไม่แย่งสายตากับวันที่มีผลซึ่งเป็นข้อมูลหลักของแถว */
+.bd-file .name { color: var(--ink); font-family: var(--sans); font-size: var(--bd-fs-label); word-break: break-all; }
 .bd-file .size { text-align: right; color: var(--muted-soft); font-variant-numeric: tabular-nums; }
 .bd-file a { color: #5C5F65; text-decoration: none; font-size: 15px; }
 .bd-file a:hover { color: var(--brand); }
@@ -1185,10 +1249,12 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .ov-tl-row .delta { margin-left: auto; }
 
   /* ═══ หน้ารายละเอียดธนาคาร (มือถือ — 7a–7d ไม่มีเวอร์ชันมือถือ ใช้โครงเดิมจาก 5b ต่อไป) ═══ */
-  .bd-hero { display: block; font-size: 20px; }
-  .bd-name { font-size: 21px; }
+  /* ขนาดตัวอักษรไม่ต้องระบุซ้ำที่นี่แล้ว — บันไดของหน้านี้จัดให้ครบตั้งแต่ ≤1080 (ดูบล็อกนั้น)
+     ค่าที่ได้ตรงกับของเดิมทุกตัวยกเว้น .bd-meta (11 → 12) ที่จงใจให้ขึ้นมาอยู่ขั้น body เดียวกับ
+     .bd-crumb/.bd-file — บรรทัดนี้เป็น meta ของทั้งหน้า (รหัส/ติดตามตั้งแต่/อัปเดตล่าสุด) เดิมเล็ก
+     กว่าทุกอย่างรอบตัวจนอ่านลำบากบนมือถือ ทั้งที่บทบาทเดียวกับ .bd-crumb ที่อยู่เหนือมันไม่กี่พิกเซล */
+  .bd-hero { display: block; }
   .bd-logo { width: 46px; height: 46px; }
-  .bd-meta { font-size: 11px; }
 
   /* ปุ่มไอคอนรอง (.toolbar .btn.btn-icon) เป็นสี่เหลี่ยม 38×38 ทุกความกว้างอยู่แล้ว — กำหนดไว้แบบ global
      ใน "Bank detail (mockup 7a–7d)" ด้านบน มือถือแค่ให้ปุ่มหลักยืดเต็มที่เหลือ */
@@ -1210,7 +1276,9 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .bd-rows .ov-prod-sub-mob {
     display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 4px;
   }
-  .bd-rows .ov-prod-sub-mob .sub-mob-txt { font: 400 10.5px var(--sans); color: var(--muted-soft); }
+  /* บรรทัดตัวเลขย่อในการ์ด (ครั้งก่อน → ปัจจุบัน · เปลี่ยนสุทธิ) — 10.5 → ขั้น micro (11) ให้เท่ากับ
+     ป้ายเล็กตัวอื่นของหน้า scope ด้วย .bd-rows ตามกฎ: .ov-prod-sub-mob ใช้ร่วมกับหน้าภาพรวม */
+  .bd-rows .ov-prod-sub-mob .sub-mob-txt { font: 400 var(--bd-fs-micro)/1.45 var(--sans); color: var(--muted-soft); }
   .bd-rows .ov-num, .bd-rows .ov-times, .bd-rows .ov-net { display: none; }
   .bd-rows .ov-timeline { margin: 0 14px 13px; border-top: 1px solid #EFECE7; }
   .bd-rows .ov-quiet { padding: 13px 14px; }
@@ -1228,8 +1296,9 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .bd-file { display: flex; align-items: center; gap: 10px; padding: 9px 13px; }
   /* วันที่บังคับขึ้นบรรทัดใหม่ด้วย flex-basis:100% แล้วชื่อไฟล์กับขนาดค่อยไหลต่อกันบรรทัดถัดไป */
   .bd-file-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; flex: 1; min-width: 0; }
-  .bd-file-info > div:first-child { flex: 1 0 100%; font-size: 12px; color: #5C5F65; }
-  .bd-file .name { font-size: 11px; }
+  /* font-size ของวันที่/ชื่อไฟล์ไม่ต้องระบุซ้ำ — สืบจาก .bd-file (ขั้น body) กับ .bd-file .name
+     (ขั้น label) ซึ่งบันได ≤1080 ย่อให้เป็น 12/11 ตรงกับค่าที่เคย hardcode ไว้ตรงนี้พอดี */
+  .bd-file-info > div:first-child { flex: 1 0 100%; color: #5C5F65; }
   .bd-file .size { text-align: left; }
   .bd-file .size::before { content: '· '; }
   .bd-file-head { display: none; }
@@ -1245,6 +1314,13 @@ summary.ov-grid::-webkit-details-marker { display: none; }
 @media (max-width: 420px) {
   .botnav a, .botnav button.navlink { font-size: 9px; padding: 8px 2px; }
   .botnav-ic { font-size: 13px; }
+
+  /* หน้ารายละเอียดธนาคาร: ชื่อธนาคารไทยยาวกว่าที่เหลือหลังหักโลโก้ 46px ("กรุงศรีอยุธยา",
+     "ทหารไทยธนชาต") ตัวหนังสือคงไว้ที่ 21px (พื้นล่างของ clamp) เพราะเป็นหัวข้อหลักของหน้า
+     ห้ามเล็กกว่านี้ — แก้ที่กล่องแทน: ลด gap แล้วปลดล็อก min-width ของกล่องข้อความ (flex item
+     ค่าเริ่มต้น min-width:auto = ห้ามหดต่ำกว่าความกว้างเนื้อหา ทำให้แถวล้นออกนอกจอแทนที่จะตกบรรทัด) */
+  .bd-ident { gap: 12px; }
+  .bd-ident > div:last-child { min-width: 0; }
 }
 
 /* ── หน้าเข้าสู่ระบบผู้ดูแล (/login) ── */
@@ -1388,11 +1464,13 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   justify-content: flex-end;
   gap: 8px;
   margin: -8px 0 24px;
-  font-size: 13px;
+  font-size: var(--bd-fs-head);
   color: var(--muted);
 }
 .bd-report svg { flex: none; color: var(--muted-soft); }
-.bd-report .req-link { margin-left: 2px; }
+/* ปุ่มลิงก์สืบขนาดจาก .btn (13px คงที่) — บังคับให้เดินตามบันไดของหน้านี้ ไม่งั้นพอจอแคบลง
+   ข้อความชวนย่อลงแต่ลิงก์ข้าง ๆ ไม่ย่อตาม เห็นเป็นสองขนาดในบรรทัดเดียว */
+.bd-report .req-link { margin-left: 2px; font-size: var(--bd-fs-head); }
 
 /* ── กล่อง (native <dialog>) ── */
 dialog.req-modal {

@@ -235,7 +235,7 @@ def run_bank(bank: dict):
     missing = [t for t in targets if t["key"] not in rates]
     if missing:
         labels = ", ".join(t.get("label", t["key"]) for t in missing)
-        msg = f"⚠ อ่านค่าไม่ได้จากประกาศฉบับนี้ ({len(missing)} รายการ): {labels} — ช่องนี้ถูกปล่อยว่างไว้"
+        msg = f"อ่านค่าไม่ได้จากประกาศฉบับนี้ ({len(missing)} รายการ): {labels} — ช่องนี้ถูกปล่อยว่างไว้"
         warnings.insert(0, msg)
         log.warning(f"[{code}] {msg}")
 
@@ -245,9 +245,15 @@ def run_bank(bank: dict):
                  prev_rates=prev_rates, changes=changes, warnings=warnings,
                  pdf_filename=pdf_fname)
 
+    # แนบ PDF ประกาศไปกับอีเมลด้วย — จุดนี้จุดเดียวเท่านั้นที่ "มีประกาศใหม่จริง" และมี pdf_bytes อยู่ในมือ
+    # แล้วจากขั้นตอนที่ 5 (ไม่ต้องอ่านไฟล์ซ้ำจากดิสก์) ส่วน --backfill ไม่ส่งอีเมลอยู่แล้วจึงไม่มีไฟล์แนบ
+    # เช่นเดียวกับอีเมล error/test/OTP ที่ไม่เคยส่ง attachments เข้ามา
+    # ต้องรู้ผลก่อนเขียนเนื้อความ: ไฟล์ที่ใหญ่เกิน EMAIL_ATTACH_MAX_MB จะไม่ถูกแนบ (แต่อีเมลยังส่งตามปกติ)
+    # เนื้อความจึงต้องเปลี่ยนตามความจริงข้อนี้ ไม่ใช่เขียนว่า "แนบมาด้วยแล้ว" ไว้ก่อน
+    attach_ok = common.attachment_fits(pdf_fname, len(pdf_bytes))
     subject, html = build_new_rates_email(bank, eff_date, latest_date, rates, prev_rates,
-                                          warnings, pdf_fname)
-    send_email(subject, html)
+                                          warnings, pdf_fname, attached=attach_ok)
+    send_email(subject, html, attachments=[(pdf_fname, pdf_bytes)] if attach_ok else None)
     log.info(f"[{code}] Done.")
 
 # ─────────────────────────── Backfill ───────────────────────────

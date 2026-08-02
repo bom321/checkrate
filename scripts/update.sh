@@ -129,10 +129,19 @@ if [ -f "$FAILED_FILE" ] && [ "$(cat "$FAILED_FILE" 2>/dev/null)" = "$TARGET" ];
 fi
 
 # ประตู CI — .github/workflows/ci.yml (pytest + docker build + smoke test) ต้องเขียวก่อนถึงยอม deploy
-# ใช้ endpoint check-runs เพราะ **GitHub Actions ไม่โผล่ใน legacy status API** และแยกผลด้วย grep
-# เพราะ DSM ไม่มี jq ให้ใช้ · repo เป็น public จึงยิงแบบไม่มี token ได้ (โควตา 60 req/ชม./IP เหลือเฟือ)
-# แต่ถ้าตั้ง GITHUB_TOKEN ใน .env ก็จะแนบให้ — จำเป็นเมื่อไหร่ก็ตามที่ repo ถูกเปลี่ยนเป็น private
-# (และได้โควตา 5,000 req/ชม. แทน) สคริปต์จึงไม่ต้องแก้อีกตอนสลับ
+#
+# **ต้องถามผลของ workflow ตัวนี้ตัวเดียว ห้ามใช้ endpoint /commits/<sha>/check-runs** — endpoint นั้น
+# คืน check ของ *ทุกเจ้า* ที่ผูกกับ commit เดียวกัน ซึ่งบน repo นี้มีของ Dependabot ปนอยู่ด้วย
+# (เจอจริงตอนทดสอบ: commit ที่ CI ของเราเขียวครบทั้งสอง job มี check ของ Dependabot ค้าง in_progress
+# อยู่อีกสองตัว → ประตูจะตัดสินว่า "CI ยังรันไม่จบ" แล้วบล็อก deploy ทั้งที่ไม่เกี่ยวกันเลย และถ้า job
+# ของ Dependabot จบด้วย failure ก็จะบล็อกด้วยเรื่องที่ไม่ใช่โค้ดของเรา)
+# endpoint ข้างล่างกรองด้วยชื่อไฟล์ workflow ให้ในตัว และคืน status/conclusion ระดับ run ที่รวมผลของ
+# ทุก job ไว้แล้ว — ตัดสินจากสองค่านี้ค่าเดียวจบ ไม่ต้องไล่ทีละ job เอง
+#
+# แยกผลด้วย grep/cut เพราะ DSM ไม่มี jq ให้ใช้ · repo เป็น public จึงยิงแบบไม่มี token ได้
+# (โควตา 60 req/ชม./IP เหลือเฟือ) แต่ถ้าตั้ง GITHUB_TOKEN ใน .env ก็จะแนบให้ — จำเป็นเมื่อไหร่ก็ตาม
+# ที่ repo ถูกเปลี่ยนเป็น private (และได้โควตา 5,000 req/ชม. แทน) สคริปต์จึงไม่ต้องแก้อีกตอนสลับ
+CI_WORKFLOW="ci.yml"
 GH_TOKEN=""      # ตั้งค่าว่างไว้ก่อนเสมอ — สคริปต์รันด้วย `set -u`
 gh_api() {
     if [ -n "$GH_TOKEN" ]; then
@@ -152,7 +161,12 @@ elif [ -z "$CI_REPO" ]; then
     log "⚠️ อ่านชื่อ repo จาก remote origin ไม่ได้ — ข้ามการเช็ค CI"
 else
     GH_TOKEN="$(env_val GITHUB_TOKEN)"
-    CI_JSON="$(gh_api "https://api.github.com/repos/${CI_REPO}/commits/${TARGET}/check-runs")"
+    CI_JSON="$(gh_api "https://api.github.com/repos/${CI_REPO}/actions/workflows/${CI_WORKFLOW}/runs?head_sha=${TARGET}&per_page=1")"
+
+    # ฟิลด์ของ run อยู่ต้น JSON ก่อน object ซ้อนทั้งหมด (…head_sha, event, status, conclusion, …)
+    # `grep -m1` จึงได้ค่าของ run เสมอ · `"conclusion": null` จะได้สตริงว่างจาก cut (ยังไม่มีผลสรุป)
+    CI_STATUS="$(echo "$CI_JSON" | grep -m1 '"status":' | cut -d'"' -f4)"
+    CI_CONCL="$(echo "$CI_JSON" | grep -m1 '"conclusion":' | cut -d'"' -f4)"
 
     # **ถามไม่ได้ = เตือนแล้วไปต่อ (fail-open)** หลักเดียวกับไฟล์ log ข้างบน: เน็ตล่ม/API rate limit
     # ไม่ควรทำให้ deploy ทั้งกระบวนหยุด · แต่ "ตอบมาว่ายังไม่เสร็จ/ไม่ผ่าน" ต้องหยุด (fail-closed)
@@ -161,15 +175,18 @@ else
         log "    ไปต่อโดยไม่มีประตู — การเช็ค CI ไม่ควรเป็นเหตุให้ deploy ทั้งกระบวนหยุด"
     elif echo "$CI_JSON" | grep -qE '"total_count": *0[^0-9]'; then
         log "⚠️ ยังไม่มีผล CI ของ commit ${TARGET} — commit ที่เก่ากว่าตอนเพิ่ม workflow เป็นแบบนี้ทั้งหมด ไปต่อ"
-    elif echo "$CI_JSON" | grep -qE '"status": *"(queued|in_progress)"'; then
-        log "CI ของ commit ${TARGET} ยังรันไม่จบ — ดูความคืบหน้าที่ https://github.com/${CI_REPO}/actions"
+    elif [ "$CI_STATUS" != "completed" ]; then
+        log "CI ของ commit ${TARGET} ยังรันไม่จบ (status=${CI_STATUS:-ไม่ทราบ}) — ดูความคืบหน้าที่ https://github.com/${CI_REPO}/actions"
         die "รอ CI ให้เสร็จก่อนแล้วกดรันใหม่"
-    elif echo "$CI_JSON" | grep -qE '"conclusion": *"(failure|cancelled|timed_out|action_required)"'; then
-        log "CI ของ commit ${TARGET} ไม่ผ่าน — ดูรายละเอียดที่ https://github.com/${CI_REPO}/actions"
-        log "    ถ้าจำเป็นต้อง deploy จริง ๆ: SKIP_CI_CHECK=1 sh scripts/update.sh"
-        die "ไม่ deploy โค้ดที่ CI ไม่เขียว"
     else
-        log "✅ CI ของ commit ${TARGET} เขียว"
+        case "$CI_CONCL" in
+            success|skipped|neutral)
+                log "✅ CI ของ commit ${TARGET} เขียว (conclusion=${CI_CONCL})" ;;
+            *)
+                log "CI ของ commit ${TARGET} ไม่ผ่าน (conclusion=${CI_CONCL:-ไม่ทราบ}) — ดูรายละเอียดที่ https://github.com/${CI_REPO}/actions"
+                log "    ถ้าจำเป็นต้อง deploy จริง ๆ: SKIP_CI_CHECK=1 sh scripts/update.sh"
+                die "ไม่ deploy โค้ดที่ CI ไม่เขียว" ;;
+        esac
     fi
 fi
 

@@ -233,7 +233,9 @@ Synology ACL กลายเป็น restart loop และเว็บดั�
 
 **ประตู CI (ขั้น 2)** — ทุก push ขึ้น GitHub จะมี workflow `.github/workflows/ci.yml` รัน
 `pytest` แล้ว build image + บูตคอนเทนเนอร์จริงเช็ค `/api/health` + `/api/version` ให้บนเครื่องของ GitHub
-`update.sh` ถาม GitHub ว่า commit ที่กำลังจะ deploy ผ่านหรือยัง แล้วตัดสินตามนี้:
+`update.sh` ถาม GitHub ว่า commit ที่กำลังจะ deploy ผ่านหรือยัง แล้วตัดสินตามนี้ — **ดูผลของ
+`ci.yml` ตัวเดียวเท่านั้น** ไม่สนใจ check อื่นที่ผูกกับ commit เดียวกัน (เช่นของ Dependabot ซึ่งรัน
+คนละจังหวะและพังด้วยเรื่องที่ไม่ใช่โค้ดเราได้ ถ้าเอามานับด้วยจะบล็อก deploy โดยไม่มีเหตุผล):
 
 | GitHub ตอบว่า | สคริปต์ทำ |
 |---|---|

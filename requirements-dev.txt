@@ -1,3 +1,10 @@
--r requirements.txt
+# ของที่ใช้เฉพาะตอนพัฒนา/รันเทสต์ — ไม่ได้ติดตั้งเข้า image (Dockerfile ใช้ requirements.txt อย่างเดียว)
+#
+# **ห้ามใส่ `-r requirements.txt` กลับมา** — ไฟล์นั้น pin ด้วย hash ครบทุกตัว และ pip จะเปิด
+# hash-checking mode ให้ทั้งการติดตั้งโดยอัตโนมัติเมื่อเจอ requirement ที่มี hash แม้แต่ตัวเดียว
+# ผลคือ pytest/httpx ข้างล่างนี้ (ไม่ pin == และไม่มี hash) จะถูก pip ปฏิเสธทันที
+# ติดตั้งแยกสองคำสั่งแทน — CI ก็ทำแบบเดียวกัน (.github/workflows/ci.yml):
+#     pip install --require-hashes -r requirements.txt
+#     pip install -r requirements-dev.txt
 pytest>=8
 httpx>=0.27          # ใช้โดย fastapi.testclient.TestClient

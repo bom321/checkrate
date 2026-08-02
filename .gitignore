@@ -10,6 +10,8 @@ __pycache__/
 .DS_Store
 *.log
 *.log.*
+# commit ที่ deploy แล้วเว็บไม่ขึ้นจน scripts/update.sh ถอยกลับให้ — เป็นสถานะของเครื่องแต่ละเครื่อง
+.deploy_failed
 handover.md
 CLAUDE.md
 backup/

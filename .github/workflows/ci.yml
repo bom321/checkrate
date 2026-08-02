@@ -1,0 +1,107 @@
+# CI — ตรวจของให้เสร็จบน GitHub ก่อนที่โค้ดจะไปถึง NAS
+#
+# NAS เป็นทั้งเครื่อง build และเครื่อง production (ดู DEPLOY.md) โค้ดที่ build ไม่ผ่านหรือบูตไม่ขึ้น
+# จึงไปพังบนเครื่องจริง — workflow นี้ย้ายด่านนั้นมาไว้บน runner ของ GitHub ที่พังแล้วไม่มีใครเดือดร้อน
+# `scripts/update.sh` อ่านผลของ workflow นี้ผ่าน GitHub API แล้วปฏิเสธ deploy commit ที่ยังไม่เขียว
+#
+# **ไม่ใช้ secret ใด ๆ เลย** — เทสต์ตั้ง env ปลอมของตัวเองครบใน tests/conftest.py และไม่มีเทสต์ตัวไหน
+# ยิงเน็ตจริง (URL ในเทสต์เป็นแค่สตริงที่เอาไปตรวจ validation) เพิ่ม secret ตรงนี้ต้องคิดให้หนัก
+# เพราะ workflow ตัวนี้รันกับ pull_request จาก fork ได้ด้วย
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# push ซ้อนกันหลายรอบติด ๆ ให้ยกเลิกรอบเก่าทิ้ง — สนใจแค่ว่า commit ล่าสุดเขียวไหม
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ต้องตรงกับ base image ใน Dockerfile (python:3.13-slim) — เทสต์ที่ผ่านบนคนละไมเนอร์เวอร์ชัน
+      # กับที่รันจริงไม่ได้พิสูจน์อะไรมากนัก
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      # **ต้องแยกสองคำสั่ง** — requirements.txt pin ด้วย hash ครบทุกตัว pip จึงเปิด hash-checking mode
+      # ให้ทั้งการติดตั้งโดยอัตโนมัติ ถ้ารวมกับ requirements-dev.txt (pytest/httpx ไม่มี hash) จะถูก
+      # ปฏิเสธทั้งชุด — เหตุผลเต็มอยู่ในหัว requirements-dev.txt
+      - name: ติดตั้ง dependency
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: รันเทสต์
+        run: pytest -q
+
+  docker:
+    name: build + smoke test
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ส่ง build args ชุดเดียวกับที่ scripts/update.sh ส่งตอน deploy จริง — สาย
+      # update.sh → docker-compose.yml → Dockerfile ARG → app/version.py จะได้ถูกทดสอบทั้งเส้น
+      - name: build image
+        run: |
+          APP_COMMIT="$(git rev-parse --short=8 HEAD)"
+          APP_BUILD_DATE="$(git log -1 --format=%cI HEAD)"
+          echo "APP_COMMIT=${APP_COMMIT}" >> "$GITHUB_ENV"
+          docker build \
+            --build-arg "APP_COMMIT=${APP_COMMIT}" \
+            --build-arg "APP_BUILD_DATE=${APP_BUILD_DATE}" \
+            -t checkrate:ci .
+
+      # จับเคส "build ผ่านแต่บูตไม่ขึ้น" ที่เคยไปเจอเอาบน NAS จนเว็บดับข้ามคืน (ส.ค. 2569)
+      # ไม่ต้อง seed ไฟล์ใน DATA_DIR: /api/health อ่านแค่ version.build_info() ส่วน data_access
+      # จับ FileNotFoundError ครบทุกจุดอยู่แล้ว — โฟลเดอร์ว่างจึงบูตได้ตามปกติ
+      # chmod 777 เพราะ image รันเป็น USER app (uid 1000) คนละ uid กับผู้ใช้ของ runner
+      - name: รันคอนเทนเนอร์
+        run: |
+          mkdir -p /tmp/ckdata && chmod 777 /tmp/ckdata
+          docker run -d --name checkrate-ci \
+            -p 8080:8080 \
+            -e ADMIN_EMAILS=ci@example.com \
+            -v /tmp/ckdata:/data \
+            checkrate:ci
+
+      - name: smoke test — เว็บขึ้นจริงและเป็นโค้ดชุดที่เพิ่ง build
+        run: |
+          for i in $(seq 1 30); do
+              if curl -fsS -o /dev/null http://127.0.0.1:8080/api/health; then
+                  echo "✅ /api/health ตอบแล้ว (รอบที่ ${i})"
+                  break
+              fi
+              if [ "$i" = "30" ]; then
+                  echo "❌ เว็บไม่ตอบภายใน 60 วิ"
+                  exit 1
+              fi
+              sleep 2
+          done
+
+          VER="$(curl -fsS http://127.0.0.1:8080/api/version)"
+          echo "เวอร์ชันที่เว็บรายงาน: ${VER}"
+          case "$VER" in
+              *"$APP_COMMIT"*) echo "✅ commit ตรงกับที่ build (${APP_COMMIT})" ;;
+              *) echo "❌ /api/version ไม่มี ${APP_COMMIT} — สายส่งป้ายเวอร์ชันขาดตอน"; exit 1 ;;
+          esac
+
+      - name: log ของคอนเทนเนอร์ (เมื่อพัง)
+        if: failure()
+        run: docker logs checkrate-ci 2>&1 | tail -50

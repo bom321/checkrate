@@ -29,7 +29,8 @@ from datetime import datetime
 # 1.0.1 = ปรับหน้าตา footer (ข้อความ "ปรับปรุงล่าสุด" + ป้ายเวอร์ชันเป็นสีเทา ฟอนต์ sans)
 # 1.1.0 = อีเมลแจ้งเตือนเป็นหนังสือแจ้งแบบเป็นทางการ + แนบไฟล์ PDF ประกาศมาด้วย (env ใหม่
 #         EMAIL_ATTACH_MAX_MB) + ส่งหาผู้รับหลายคนแบบ BCC · ตัวอักษรหน้า /bank/{code} เป็นบันไดเดียวทุกจอ
-VERSION = "1.1.0"
+# 1.1.1 = นาฬิกาบน footer ใช้รูปแบบวันที่ไทยชุดเดียวกับ "ปรับปรุงล่าสุด" (เดิมเป็น toLocaleString)
+VERSION = "1.1.1"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

@@ -1,5 +1,7 @@
 # CheckRate — Dashboard ติดตามอัตราดอกเบี้ยเงินฝาก
 
+[![CI](https://github.com/bom321/checkrate/actions/workflows/ci.yml/badge.svg)](https://github.com/bom321/checkrate/actions/workflows/ci.yml)
+
 ระบบติดตามประกาศอัตราดอกเบี้ยเงินฝากของธนาคาร: ดาวน์โหลด PDF ประกาศ → อ่านค่าอัตราดอกเบี้ย →
 บันทึกประวัติเป็น CSV → แจ้งเตือนทางอีเมลเมื่อมีการเปลี่ยนแปลง พร้อม **เว็บ Dashboard** สำหรับดูภาพรวม
 กราฟแนวโน้ม จัดการค่า config และสั่งรันตรวจสอบด้วยตนเอง ออกแบบให้แพ็กเป็น Docker รันบน **Synology NAS** ได้

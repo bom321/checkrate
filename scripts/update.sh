@@ -27,6 +27,9 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # ตั้ง safe.directory เฉพาะคำสั่งในสคริปต์นี้ผ่าน -c (ไม่เขียนลง ~/.gitconfig ของ root ให้เป็นสถานะค้าง)
 GIT="git -c safe.directory=${PROJECT_DIR}"
 LOG_FILE="${PROJECT_DIR}/update.log"
+# commit ที่ deploy แล้วเว็บไม่ขึ้นจนต้องถอยกลับ — กันไม่ให้ task รายสัปดาห์เดินเข้าไปลองซ้ำทุกจันทร์
+# (ขั้น 8 เขียน, ขั้น 2.5 อ่าน, ลบทิ้งเมื่อ deploy สำเร็จ) อยู่ใน .gitignore
+FAILED_FILE="${PROJECT_DIR}/.deploy_failed"
 BRANCH="${BRANCH:-main}"
 CONTAINER="checkrate"
 HEALTH_RETRIES=45          # เช็ค health ทุก 2 วิ รวมสูงสุด ~90 วิ (image build เสร็จแล้ว แค่รอ uvicorn ขึ้น)
@@ -112,6 +115,64 @@ if ! $GIT diff --quiet || ! $GIT diff --cached --quiet; then
     die "มีไฟล์ที่ถูกแก้ค้างไว้บน NAS (git status ไม่สะอาด) — เก็บกวาดก่อนแล้วค่อยรันใหม่"
 fi
 
+TARGET="$($GIT rev-parse "origin/${BRANCH}")"
+
+# ── 2.5 ประตูก่อน merge: commit นี้เคยพังไหม / CI เขียวหรือยัง ──
+# ทั้งสองด่านทำ **ก่อน merge โดยเจตนา** — ถ้า die หลัง merge working tree จะค้างอยู่ที่ commit ที่เรา
+# เพิ่งปฏิเสธไปเอง ขณะที่คอนเทนเนอร์ยังเป็นของเก่า (git ไม่ตรงกับของที่รันอยู่ = สถานะที่อ่านยากที่สุด
+# เวลามาไล่ทีหลัง) ปฏิเสธตั้งแต่ตรงนี้แล้วทุกอย่างยังอยู่ในสถานะเดิมครบ
+if [ -f "$FAILED_FILE" ] && [ "$(cat "$FAILED_FILE" 2>/dev/null)" = "$TARGET" ]; then
+    log "commit ${TARGET} เคย deploy แล้วเว็บไม่ขึ้น จึงถูกถอยกลับอัตโนมัติไปแล้วรอบหนึ่ง"
+    log "    แก้ต้นเหตุแล้ว push commit ใหม่ได้ตามปกติ (commit ใหม่ไม่ติดล็อกนี้)"
+    log "    ถ้าจะลอง commit เดิมซ้ำ ให้ลบไฟล์ทิ้งก่อน: rm ${FAILED_FILE}"
+    die "ไม่ deploy commit ที่รู้อยู่แล้วว่าพัง"
+fi
+
+# ประตู CI — .github/workflows/ci.yml (pytest + docker build + smoke test) ต้องเขียวก่อนถึงยอม deploy
+# ใช้ endpoint check-runs เพราะ **GitHub Actions ไม่โผล่ใน legacy status API** และแยกผลด้วย grep
+# เพราะ DSM ไม่มี jq ให้ใช้ · repo เป็น public จึงยิงแบบไม่มี token ได้ (โควตา 60 req/ชม./IP เหลือเฟือ)
+# แต่ถ้าตั้ง GITHUB_TOKEN ใน .env ก็จะแนบให้ — จำเป็นเมื่อไหร่ก็ตามที่ repo ถูกเปลี่ยนเป็น private
+# (และได้โควตา 5,000 req/ชม. แทน) สคริปต์จึงไม่ต้องแก้อีกตอนสลับ
+GH_TOKEN=""      # ตั้งค่าว่างไว้ก่อนเสมอ — สคริปต์รันด้วย `set -u`
+gh_api() {
+    if [ -n "$GH_TOKEN" ]; then
+        curl -fsS -H 'Accept: application/vnd.github+json' \
+             -H "Authorization: Bearer ${GH_TOKEN}" "$1" 2>/dev/null || true
+    else
+        curl -fsS -H 'Accept: application/vnd.github+json' "$1" 2>/dev/null || true
+    fi
+}
+
+CI_REPO="$($GIT config --get remote.origin.url 2>/dev/null \
+    | sed -e 's#.*github\.com[:/]##' -e 's#\.git$##' || true)"
+
+if [ "${SKIP_CI_CHECK:-0}" = "1" ]; then
+    log "⏭  ข้ามการเช็ค CI ตามที่สั่ง (SKIP_CI_CHECK=1)"
+elif [ -z "$CI_REPO" ]; then
+    log "⚠️ อ่านชื่อ repo จาก remote origin ไม่ได้ — ข้ามการเช็ค CI"
+else
+    GH_TOKEN="$(env_val GITHUB_TOKEN)"
+    CI_JSON="$(gh_api "https://api.github.com/repos/${CI_REPO}/commits/${TARGET}/check-runs")"
+
+    # **ถามไม่ได้ = เตือนแล้วไปต่อ (fail-open)** หลักเดียวกับไฟล์ log ข้างบน: เน็ตล่ม/API rate limit
+    # ไม่ควรทำให้ deploy ทั้งกระบวนหยุด · แต่ "ตอบมาว่ายังไม่เสร็จ/ไม่ผ่าน" ต้องหยุด (fail-closed)
+    if [ -z "$CI_JSON" ]; then
+        log "⚠️ ถามผล CI จาก GitHub ไม่ได้ (เน็ต / rate limit / repo เป็น private แต่ไม่ได้ตั้ง GITHUB_TOKEN)"
+        log "    ไปต่อโดยไม่มีประตู — การเช็ค CI ไม่ควรเป็นเหตุให้ deploy ทั้งกระบวนหยุด"
+    elif echo "$CI_JSON" | grep -qE '"total_count": *0[^0-9]'; then
+        log "⚠️ ยังไม่มีผล CI ของ commit ${TARGET} — commit ที่เก่ากว่าตอนเพิ่ม workflow เป็นแบบนี้ทั้งหมด ไปต่อ"
+    elif echo "$CI_JSON" | grep -qE '"status": *"(queued|in_progress)"'; then
+        log "CI ของ commit ${TARGET} ยังรันไม่จบ — ดูความคืบหน้าที่ https://github.com/${CI_REPO}/actions"
+        die "รอ CI ให้เสร็จก่อนแล้วกดรันใหม่"
+    elif echo "$CI_JSON" | grep -qE '"conclusion": *"(failure|cancelled|timed_out|action_required)"'; then
+        log "CI ของ commit ${TARGET} ไม่ผ่าน — ดูรายละเอียดที่ https://github.com/${CI_REPO}/actions"
+        log "    ถ้าจำเป็นต้อง deploy จริง ๆ: SKIP_CI_CHECK=1 sh scripts/update.sh"
+        die "ไม่ deploy โค้ดที่ CI ไม่เขียว"
+    else
+        log "✅ CI ของ commit ${TARGET} เขียว"
+    fi
+fi
+
 $GIT merge --ff-only "origin/${BRANCH}" >/dev/null 2>&1 \
     || die "merge แบบ fast-forward ไม่ได้ — โค้ดบน NAS แตกสายจาก origin/${BRANCH} แล้ว"
 
@@ -185,42 +246,85 @@ log "กำลัง restart คอนเทนเนอร์…"
 $COMPOSE up -d >>"$LOG_FILE" 2>&1 || die "docker-compose up -d ไม่สำเร็จ (ดูรายละเอียดใน ${LOG_FILE})"
 
 # ── 7. ยืนยันว่าเว็บขึ้นจริง ไม่ใช่แค่คอนเทนเนอร์ start แล้ว crash ──
+# แยกเป็นฟังก์ชันเพราะขั้น 8 ต้องเรียกซ้ำหลังถอยกลับ — **ตรรกะข้างในเหมือนเดิมทุกบรรทัด**
 # curl ต้องยิงที่พอร์ตฝั่ง **host** (HOST_WEB_PORT) ไม่ใช่ WEB_PORT ที่เป็นพอร์ตในคอนเทนเนอร์
 # เช็ค RestartCount ควบคู่ไปด้วย — restart loop จะวนจน retry หมดโดย curl ไม่เคยสำเร็จ ถ้าไม่ดูตรงนี้
 # จะแยกไม่ออกว่า "ยังบูตไม่เสร็จ" กับ "บูตแล้วตายซ้ำ ๆ" (เสียเวลาไปทั้งคืนเพราะเรื่องนี้มาแล้ว)
-i=0
-while [ "$i" -lt "$HEALTH_RETRIES" ]; do
-    if curl -fsS -o /dev/null "http://127.0.0.1:${HOST_WEB_PORT}/api/health"; then
-        FMT='{{if .State.Health}}health={{.State.Health.Status}} {{end}}restarts={{.RestartCount}} user={{.Config.User}}'
-        STATE="$(docker inspect --format "$FMT" "$CONTAINER" 2>/dev/null || echo '(อ่านไม่ได้)')"
-        log "✅ อัปเดตเสร็จ — เว็บตอบที่พอร์ต ${HOST_WEB_PORT} แล้ว"
-        log "   สถานะคอนเทนเนอร์: ${STATE}"
-        # ยืนยันว่าเว็บที่ตอบอยู่คือโค้ดชุดใหม่จริง ไม่ใช่คอนเทนเนอร์เก่าที่ไม่ได้ recreate —
-        # เทียบ commit ที่เว็บรายงานกับ commit ที่เพิ่ง build ตรงนี้ที่เดียวจบ (เคสจริง ส.ค. 2569:
-        # ของเก่ายังรันอยู่โดยไม่มีใครรู้เพราะ health check ผ่านเหมือนกันทุกประการ)
-        RUNNING_VER="$(curl -fsS "http://127.0.0.1:${HOST_WEB_PORT}/api/version" 2>/dev/null || true)"
-        log "   เวอร์ชันที่เว็บรายงาน: ${RUNNING_VER:-(อ่านไม่ได้)}"
-        case "$RUNNING_VER" in
-            *"$APP_COMMIT"*) : ;;
-            *) log "   ⚠️ commit ที่เว็บรายงานไม่ตรงกับ ${APP_COMMIT} ที่เพิ่ง build — คอนเทนเนอร์อาจไม่ได้ถูก recreate" ;;
-        esac
-        log "   (health=starting ได้ในนาทีแรก — start_period ของ healthcheck ตั้งไว้ 60 วิ)"
-        docker image prune -f >/dev/null 2>&1 || true   # เก็บกวาด image เก่าที่ไม่มีใครอ้างถึง (ตัว :previous มี tag จึงรอด)
-        exit 0
-    fi
+wait_healthy() {
+    i=0
+    while [ "$i" -lt "$HEALTH_RETRIES" ]; do
+        if curl -fsS -o /dev/null "http://127.0.0.1:${HOST_WEB_PORT}/api/health"; then
+            FMT='{{if .State.Health}}health={{.State.Health.Status}} {{end}}restarts={{.RestartCount}} user={{.Config.User}}'
+            STATE="$(docker inspect --format "$FMT" "$CONTAINER" 2>/dev/null || echo '(อ่านไม่ได้)')"
+            log "✅ เว็บตอบที่พอร์ต ${HOST_WEB_PORT} แล้ว"
+            log "   สถานะคอนเทนเนอร์: ${STATE}"
+            # ยืนยันว่าเว็บที่ตอบอยู่คือโค้ดชุดใหม่จริง ไม่ใช่คอนเทนเนอร์เก่าที่ไม่ได้ recreate —
+            # เทียบ commit ที่เว็บรายงานกับ commit ที่เพิ่ง build ตรงนี้ที่เดียวจบ (เคสจริง ส.ค. 2569:
+            # ของเก่ายังรันอยู่โดยไม่มีใครรู้เพราะ health check ผ่านเหมือนกันทุกประการ)
+            # **ยังคงเป็นแค่ ⚠️ ไม่ใช่ die** — CI มี smoke test ที่ครอบเคสนี้ให้แล้ว และการ die ตรงนี้
+            # จะไปสั่งถอยกลับในขั้น 8 ทั้งที่เว็บตอบเป็นปกติดี
+            RUNNING_VER="$(curl -fsS "http://127.0.0.1:${HOST_WEB_PORT}/api/version" 2>/dev/null || true)"
+            log "   เวอร์ชันที่เว็บรายงาน: ${RUNNING_VER:-(อ่านไม่ได้)}"
+            case "$RUNNING_VER" in
+                *"$APP_COMMIT"*) : ;;
+                *) log "   ⚠️ commit ที่เว็บรายงานไม่ตรงกับ ${APP_COMMIT} ที่เพิ่ง build — คอนเทนเนอร์อาจไม่ได้ถูก recreate" ;;
+            esac
+            log "   (health=starting ได้ในนาทีแรก — start_period ของ healthcheck ตั้งไว้ 60 วิ)"
+            return 0
+        fi
 
-    RESTARTS="$(docker inspect --format '{{.RestartCount}}' "$CONTAINER" 2>/dev/null || echo 0)"
-    if [ "$RESTARTS" -gt 2 ]; then
-        log "คอนเทนเนอร์ restart ไปแล้ว ${RESTARTS} รอบ = บูตแล้วตายซ้ำ ๆ ไม่ใช่แค่บูตช้า — เลิกรอ"
-        break
-    fi
+        RESTARTS="$(docker inspect --format '{{.RestartCount}}' "$CONTAINER" 2>/dev/null || echo 0)"
+        if [ "$RESTARTS" -gt 2 ]; then
+            log "คอนเทนเนอร์ restart ไปแล้ว ${RESTARTS} รอบ = บูตแล้วตายซ้ำ ๆ ไม่ใช่แค่บูตช้า — เลิกรอ"
+            return 1
+        fi
 
-    i=$((i + 1))
-    sleep 2
-done
+        i=$((i + 1))
+        sleep 2
+    done
+    return 1
+}
 
+if wait_healthy; then
+    log "✅ อัปเดตเสร็จ"
+    rm -f "$FAILED_FILE" 2>/dev/null || true          # deploy สำเร็จแล้ว ล็อกของรอบก่อนหมดหน้าที่
+    docker image prune -f >/dev/null 2>&1 || true     # เก็บกวาด image เก่าที่ไม่มีใครอ้างถึง (ตัว :previous มี tag จึงรอด)
+    exit 0
+fi
+
+# ── 8. เว็บไม่ขึ้น: ถอยกลับอัตโนมัติ ──
 log "log ล่าสุดของคอนเทนเนอร์:"
 docker logs --tail 30 "$CONTAINER" 2>&1 | sed 's/^/    /' | tee -a "$LOG_FILE"
+
+# ถอยด้วย `git reset` + rebuild **ไม่ใช่** retag ${CONTAINER}:previous — ชื่อ image ที่ compose ใช้จริง
+# ผูกกับชื่อ project การ retag ทับจึงเปราะ และยังทิ้งให้ repo ไม่ตรงกับของที่รันอยู่เหมือนเดิม
+# ส่วน reset --hard ทำให้ทั้ง git และคอนเทนเนอร์กลับไปอยู่สถานะเดียวกันจริง ๆ และ build รอบนี้เร็ว
+# เพราะ layer cache ของ commit เก่ายังอยู่ครบ · :previous ยัง tag ค้างไว้เป็นตาข่ายชั้นสุดท้ายเหมือนเดิม
+if [ "$BEFORE" != "$AFTER" ] && [ "${AUTO_ROLLBACK:-1}" = "1" ]; then
+    log "⏪ ถอยกลับไป commit ${BEFORE} อัตโนมัติ…"
+    echo "$AFTER" >"$FAILED_FILE" 2>/dev/null \
+        || log "    ⚠️ เขียน ${FAILED_FILE} ไม่ได้ — รอบหน้าจะไม่มีอะไรกันไม่ให้ลอง commit นี้ซ้ำ"
+
+    if $GIT reset --hard "$BEFORE" >>"$LOG_FILE" 2>&1; then
+        # ป้ายเวอร์ชันต้องคำนวณใหม่จาก commit เก่า ไม่งั้น image ที่ได้จะติดป้ายของ commit ที่เพิ่งถอยทิ้ง
+        APP_COMMIT="$($GIT rev-parse --short=8 HEAD)"
+        APP_BUILD_DATE="$($GIT log -1 --format=%cI HEAD)"
+        export APP_COMMIT APP_BUILD_DATE
+
+        if $COMPOSE up -d --build >>"$LOG_FILE" 2>&1 && wait_healthy; then
+            log "✅ ถอยกลับสำเร็จ — เว็บกลับมาเป็น commit ${BEFORE} แล้ว"
+            log "   commit ${AFTER} ถูกกันไว้ใน ${FAILED_FILE} จะไม่ถูก deploy ซ้ำจนกว่าจะลบไฟล์นั้นทิ้ง"
+            log "   แก้ต้นเหตุแล้ว push commit ใหม่ได้ตามปกติ (commit ใหม่ไม่ติดล็อกนี้)"
+            # **exit 1 ไม่ใช่ 0** — เว็บกลับมาแล้วก็จริง แต่ deploy รอบนี้ล้มเหลว ต้องให้ Task Scheduler
+            # ส่งอีเมลแจ้ง ไม่งั้นการถอยกลับจะเงียบสนิทและไม่มีใครรู้ว่าของใหม่ยังไม่ได้ขึ้น
+            exit 1
+        fi
+        log "❌ ถอยกลับแล้วเว็บยังไม่ขึ้น — ต้องกู้ด้วยมือ"
+    else
+        log "❌ git reset --hard ไม่สำเร็จ — ต้องกู้ด้วยมือ"
+    fi
+fi
+
 log "ทางถอย (คัดลอกไปรันได้เลย):"
 log "    cd ${PROJECT_DIR} && ${GIT} reset --hard ${BEFORE} && ${COMPOSE} up -d --build"
 if [ -n "$PREV_IMAGE" ]; then

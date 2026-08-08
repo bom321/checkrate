@@ -30,7 +30,9 @@ from datetime import datetime
 # 1.1.0 = อีเมลแจ้งเตือนเป็นหนังสือแจ้งแบบเป็นทางการ + แนบไฟล์ PDF ประกาศมาด้วย (env ใหม่
 #         EMAIL_ATTACH_MAX_MB) + ส่งหาผู้รับหลายคนแบบ BCC · ตัวอักษรหน้า /bank/{code} เป็นบันไดเดียวทุกจอ
 # 1.1.1 = นาฬิกาบน footer ใช้รูปแบบวันที่ไทยชุดเดียวกับ "ปรับปรุงล่าสุด" (เดิมเป็น toLocaleString)
-VERSION = "1.1.1"
+# 1.1.2 = BBL: เพิ่ม OCR variant ที่ 5 (median filter + 500dpi) กู้ค่าที่อ่านไม่ได้ในไฟล์สแกน 1 บิต
+#         ครบทั้ง 8 ช่อง (ประกาศ 24/29 ก.ค. และ 4 ก.ย. 2568) — ไม่ต้องกรอกมืออีก
+VERSION = "1.1.2"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

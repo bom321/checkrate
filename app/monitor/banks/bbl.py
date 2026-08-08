@@ -56,6 +56,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 import pdfplumber
+from PIL import ImageFilter
 
 from .. import common
 from ..common import log, THAI_MONTHS
@@ -89,11 +90,20 @@ VOTE_MIN = 2
 # **ห้ามสลับลำดับ/แก้ variant[0] โดยไม่ทดสอบ CSV diff ใหม่** — variant[0] ต้องตรงกับพฤติกรรมเดิมเป๊ะ
 # (ไฟล์ปกติ 13/19 ไฟล์ที่ทดสอบ ต้องได้ค่าเดิม 100% เพราะ remaining ว่างตั้งแต่ variant[0] จึงไม่มีการลอง
 # variant อื่นเลย) ลำดับ variant ถัดจากนั้นมาจากการวัดผลจริงกับไฟล์ที่พัง (ก.ค. 2568) — ดู CLAUDE.md
-OCR_VARIANTS: list[tuple[str, int, int]] = [
+#
+# ช่องที่ 4 ของทูเพิล (มีหรือไม่มีก็ได้) = ชื่อ preprocess ใน _PREPROCESSORS — เพิ่มมาเพื่อไฟล์ที่สแกนเป็น
+# **ขาว-ดำ 1 บิต (CCITTFax)** ซึ่งเป็นต้นเหตุจริงของไฟล์ที่อ่านป้ายไม่ออก (วัดแล้ว: ไฟล์ที่อ่านได้ปกติทุก
+# ไฟล์เป็น JPEG 8 บิต มีพิกเซลกลางโทนที่ขอบตัวอักษร 1.3-1.8% ส่วนไฟล์ที่พังมี 0.00% — ความละเอียดต้นทาง
+# เท่ากันทั้งคู่ ~283 DPI ไม่ได้เอียง/เบลอต่างกัน) ภาพ 1 บิตถูก threshold แข็งจนสระ/วรรณยุกต์ขาดและเส้น
+# ขอบตารางแตกเป็นเม็ด noise — median filter ลบเม็ดพวกนั้นโดยคงขอบตัวอักษรไว้ ตัวเลขอัตราในไฟล์เหล่านี้
+# OCR อ่านถูกอยู่แล้วตั้งแต่ variant[0] ที่พังคือ "ป้ายแถว/หมวด" เท่านั้น (เช่น "ระยะเวลา" → "ระแหเวลา",
+# "9. ประจำ" → "จ. ประจำ") จึงหาแถวไม่เจอแล้วทิ้งทั้งแถว
+OCR_VARIANTS: list[tuple] = [
     ("tha+eng", 6, 300),   # ค่าเดิม/ค่าเริ่มต้น
     ("tha", 6, 300),       # กู้ป้ายที่ OCR ปนอักษรละตินมั่ว (เช่น "สะสมทรัพย์" → "avauwiwed")
     ("tha+eng", 4, 300),   # psm 4 (single column) ช่วยไฟล์ที่ตารางเพี้ยนทั้งหน้า
     ("tha+eng", 6, 400),   # DPI สูงขึ้น ช่วยไฟล์สแกนเบลอ/ตัวอักษรเล็ก
+    ("tha+eng", 4, 500, "denoise"),   # สแกน 1 บิต: median filter + DPI สูง (ดูคอมเมนต์ข้างบน)
 ]
 
 DEFAULT_DEPOSITOR = "บุคคลธรรมดา"
@@ -139,8 +149,19 @@ def _value_of(token: str) -> float | None:
     return float(f"{m.group(1)}.{m.group(2)}") if m else None
 
 
-def _render_page1_png(pdf_bytes: bytes, top_frac: float | None = None, dpi: int = OCR_DPI) -> bytes | None:
-    """render หน้า 1 เป็น PNG (top_frac = ครอปเฉพาะสัดส่วนบนของหน้า เช่น 0.25 สำหรับหัวกระดาษ)"""
+def _denoise(img):
+    """grayscale → median filter 3x3 — ลบเม็ด noise ของสแกน 1 บิตโดยคงขอบตัวอักษรไว้
+    (วัดแล้ว: รัศมี 5 แรงเกินไป ตัวเลขเริ่มเพี้ยน 0.90→9.90; autocontrast/otsu/adaptive/sharpen ไม่ช่วยเลย)"""
+    return img.convert("L").filter(ImageFilter.MedianFilter(3))
+
+
+_PREPROCESSORS = {"denoise": _denoise}
+
+
+def _render_page1_png(pdf_bytes: bytes, top_frac: float | None = None, dpi: int = OCR_DPI,
+                      preprocess: str | None = None) -> bytes | None:
+    """render หน้า 1 เป็น PNG (top_frac = ครอปเฉพาะสัดส่วนบนของหน้า เช่น 0.25 สำหรับหัวกระดาษ)
+    preprocess = ชื่อใน _PREPROCESSORS (None = ภาพดิบเหมือนเดิมทุกประการ)"""
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[0]
@@ -150,6 +171,9 @@ def _render_page1_png(pdf_bytes: bytes, top_frac: float | None = None, dpi: int 
     except Exception as e:
         log.error(f"bbl: render PDF เป็นภาพไม่สำเร็จ: {e}")
         return None
+    fn = _PREPROCESSORS.get(preprocess) if preprocess else None
+    if fn is not None:
+        img = fn(img)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -230,8 +254,8 @@ def _page1_lines(pdf_bytes: bytes, variant: tuple[str, int, int] = OCR_VARIANTS[
     with _LINES_CACHE_LOCK:
         if cache_key in _LINES_CACHE:
             return _LINES_CACHE[cache_key]
-    lang, psm, dpi = variant
-    png = _render_page1_png(pdf_bytes, dpi=dpi)
+    lang, psm, dpi = variant[:3]
+    png = _render_page1_png(pdf_bytes, dpi=dpi, preprocess=variant[3] if len(variant) > 3 else None)
     if png is None:
         return None
     words = _ocr_words(png, lang=lang, psm=psm, dpi=dpi)
@@ -649,7 +673,7 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
             continue
         r, tu, _ = _extract_targets(lines, targets, keys=remaining)
         gained = set(r) & remaining
-        lang, psm, dpi = variant
+        lang, psm, dpi = variant[:3]
         tag = "" if i == 0 else f" (OCR variant สำรอง #{i}: {lang}/psm{psm}/{dpi}dpi)"
 
         cell_gained = gained - max_keys
@@ -867,8 +891,9 @@ def get_effective_date(pdf_bytes: bytes) -> str | None:
     ไล่ลอง OCR_VARIANTS เหมือน extract_rates — ไฟล์ปกติเจอวันที่ตั้งแต่ variant แรกและไม่แตะ variant อื่น
     (ไม่มี cache เหมือน _page1_lines เพราะ crop 25% บนคนละภาพกับตารางเต็มหน้า และถูกเรียกครั้งเดียวต่อไฟล์)"""
     for variant in OCR_VARIANTS:
-        lang, psm, dpi = variant
-        png = _render_page1_png(pdf_bytes, top_frac=0.25, dpi=dpi)
+        lang, psm, dpi = variant[:3]
+        png = _render_page1_png(pdf_bytes, top_frac=0.25, dpi=dpi,
+                                preprocess=variant[3] if len(variant) > 3 else None)
         if png is None:
             continue
         words = _ocr_words(png, lang=lang, psm=psm, dpi=dpi)

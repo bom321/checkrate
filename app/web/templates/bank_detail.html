@@ -163,7 +163,7 @@
 <div class="ov-panel bd-trend">
   <div class="ov-panel-head bd-trend-head">
     <div>
-      <div class="ov-panel-title">แนวโน้มอัตราย้อนหลัง</div>
+      <div class="ov-panel-title bd-panel-title">แนวโน้มอัตราย้อนหลัง</div>
       <div class="bd-trend-sub">แสดงเฉพาะอัตราที่เลือกจากแผงด้านขวา · จุดคือวันที่ประกาศ — ชี้เพื่อดูรายละเอียด</div>
     </div>
     <div class="bd-trend-tools">
@@ -240,7 +240,7 @@
      ส่วนแถวที่ไม่เปลี่ยนเลย (times == 0) ไทม์ไลน์ว่าง ไม่มีอะไรให้กาง — คงเป็น <div> ธรรมดา -->
 <div class="ov-panel" style="margin-top:14px">
   <div class="ov-panel-head">
-    <div class="ov-panel-title">อัตราดอกเบี้ยเงินฝากทุกระยะ</div>
+    <div class="ov-panel-title bd-panel-title">อัตราดอกเบี้ยเงินฝากทุกระยะ</div>
     <div class="ov-months">
       {% set shown = month_options[:2]|map(attribute='value')|list %}
       {% for m in month_options[:2] %}
@@ -341,7 +341,7 @@
 <!-- ไฟล์ประกาศย้อนหลังทั้งหมด -->
 <div class="ov-panel" style="margin-top:14px">
   <div class="ov-panel-head">
-    <div class="ov-panel-title">📁 ไฟล์ประกาศย้อนหลังทั้งหมด</div>
+    <div class="ov-panel-title bd-panel-title">📁 ไฟล์ประกาศย้อนหลังทั้งหมด</div>
     <span class="bd-files-count">รวมทุกระยะ — {{ pdf_count }} ไฟล์</span>
   </div>
 

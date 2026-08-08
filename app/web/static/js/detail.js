@@ -261,12 +261,46 @@
     const W = Math.max(320, Math.round(plotBox.clientWidth));
     const H = Math.max(180, Math.round(plotBox.clientHeight));
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    const X0 = 44;            // เว้นที่ป้ายแกน Y
-    // เว้นที่ป้ายค่าล่าสุดท้ายเส้น — ต้อง ≥ 7 (ระยะห่างจากเส้น) + 54 (กว้างกล่อง) + ขอบเหลือ ๆ
+
+    // ── บันไดขนาดตัวอักษรของกราฟ: อ่านจาก CSS ตอน render แทนเขียน breakpoint ซ้ำใน JS ──
+    // CSS (style.css ~1063, @media ≤1080px) เป็น source of truth เดียวเรื่องขนาด — ย่อ
+    // --bd-fs-body/--bd-fs-micro ลงหนึ่งขั้นที่จอแคบกว่า 1080px ที่นี่แค่ "ตาม" ค่านั้น ไม่ตัดสินใจเอง
+    // เรียกทุกครั้งที่ renderChart ทำงาน (รวมตอน ResizeObserver สั่งวาดใหม่) จึงตามทันตอนข้ามช่วงจอ
+    // fallback เป็นค่าเดสก์ท็อปเดิมถ้า parse ไม่ได้/ตัวแปรว่าง กันหน้าพังถ้า CSS เปลี่ยนโครงในอนาคต
+    const BODY_BASE = 12.5;   // --bd-fs-body ที่เดสก์ท็อป (>1080px) — ตัวเลข hardcode เดิมทั้งหมดอิงค่านี้
+    const MICRO_BASE = 11;    // --bd-fs-micro ที่เดสก์ท็อป
+    const readFs = (name, fallback) => {
+      const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+      return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+    };
+    const bodyPx = readFs('--bd-fs-body', BODY_BASE);
+    const microPx = readFs('--bd-fs-micro', MICRO_BASE);
+    // อัตราส่วนต่อค่าฐาน — คูณกับตัวเลข hardcode เดิมทุกจุดข้างล่าง ที่เดสก์ท็อป (bodyPx===BODY_BASE)
+    // อัตราส่วน = 1 พอดี ผลลัพธ์จึงเท่าค่าคงที่เดิมเป๊ะเสมอ (ข้อ 4 ของสเปก) ส่วนจอแคบกว่าค่อยย่อจริง
+    const bodyScale = bodyPx / BODY_BASE;
+    const microScale = microPx / MICRO_BASE;
+    const fs = (n) => Math.round(n * 10) / 10;   // ปัดทศนิยม 1 ตำแหน่งกันเลข font-size ยาวไม่จำเป็น
+
+    const FS_AXIS = fs(11 * microScale);      // ป้ายแกน X/Y + tooltip วันที่ (เดิม 11 คงที่ทุกจุด)
+    const FS_TAIL = fs(12.5 * bodyScale);     // ป้ายค่าล่าสุดท้ายเส้น (เดิม 12.5)
+    const FS_NAME = fs(12 * bodyScale);       // tooltip ชื่อ + ส่วนต่าง (เดิม 12 เท่ากันทั้งคู่ในดีไซน์เดิม)
+    const FS_VAL = Math.round(bodyPx * 1.52); // tooltip ค่า — ตัวเด่นสุด (เดิม 19 = 12.5×1.52) ปัดเป็น
+                                               // จำนวนเต็มเพราะเป็นตัวเลขที่ผู้ใช้อ่านเป็นหลัก ไม่ใช่ป้ายกำกับ
+    const valScale = FS_VAL / 19;             // อัตราส่วนของ "แถวค่า" ในกล่อง tooltip ไว้ขยับระยะรอบมันด้วย
+
+    const X0 = Math.round(44 * microScale);   // เว้นที่ป้ายแกน Y — กว้างตามฟอนต์ป้าย (เดิม 44 คงที่)
+    // เว้นที่ป้ายค่าล่าสุดท้ายเส้น — ต้อง ≥ 7 (ระยะห่างจากเส้น) + กว้างกล่อง (สเกลตาม FS_TAIL) + ขอบเหลือ ๆ
     // เดิม 58 พอสำหรับข้อความลอย แต่กล่องตามดีไซน์ล้นขอบ viewBox ไป 3px แล้วโดน SVG ตัดขอบขวาหายไปทั้งเส้น
-    const X1 = W - 66;        // (ดีไซน์เว้น mR=66 เท่ากันพอดี)
-    const TOP = 18;           // เส้น grid บนสุด
-    const BASE = H - 26;      // เส้นฐาน (ใต้ gridline ล่างสุดครึ่งช่อง) — ที่เหลือเป็นป้ายแกน X
+    // ต้องคำนวณ TAIL_W/TAIL_MARGIN (ขนาดกล่องป้ายท้ายเส้น) ไว้ก่อนตรงนี้ เพราะ X1 ใช้ต่อ —
+    // ตัวกล่องจริง (rect/text) มาวาดทีหลังตอนถึงส่วนป้ายค่าล่าสุด ใช้ค่าเดียวกันนี้ซ้ำ
+    const TAIL_W = Math.round(54 * bodyScale);   // กล่องป้ายค่าท้ายเส้น: กว้าง (เดิม 54)
+    const TAIL_H = Math.round(22 * bodyScale);   // สูง (เดิม 22)
+    const TAIL_HH = TAIL_H / 2;                  // ครึ่งสูง — แทนค่าคงที่ 11 เดิมที่ผูกกับ height/2
+    const TAIL_RX = fs(6 * bodyScale);           // มุมโค้ง (เดิม 6)
+    const TAIL_MARGIN = 5;                       // ขอบเหลือหลังกล่อง (66 เดิม = 7+54+5) ไม่ผูกฟอนต์ ไม่สเกล
+    const X1 = W - (7 + TAIL_W + TAIL_MARGIN);   // (ดีไซน์เดสก์ท็อปเว้น mR=66 เท่ากันพอดี)
+    const TOP = 18;           // เส้น grid บนสุด — ระยะคงที่ ไม่ผูกฟอนต์
+    const BASE = H - Math.round(26 * microScale); // เส้นฐาน (ใต้ gridline ล่างสุดครึ่งช่อง) — ที่เหลือเป็นป้ายแกน X
 
     const lo = Math.min(...values), hi = Math.max(...values);
     // เลือกขั้นแกน Y แบบ "เลขสวย" ที่เล็กสุดซึ่งครอบข้อมูลได้ใน MAX_SPANS ช่อง
@@ -296,11 +330,12 @@
 
     // ── gridline + ป้ายแกน Y + เส้นฐาน ──
     const grid = add(svg, 'g', { stroke: '#EFECE7', 'stroke-width': '1' });
-    const yLab = add(svg, 'g', { fill: '#8A8D93', 'font-size': '11', 'text-anchor': 'end' });
+    const yLab = add(svg, 'g', { fill: '#8A8D93', 'font-size': FS_AXIS, 'text-anchor': 'end' });
+    const AXIS_BASELINE = fs(4 * microScale);   // baseline offset ของตัวเลขแกน Y เทียบเส้น grid (เดิม 4)
     for (let i = 0; i < TICKS; i++) {
       const gy = r2(TOP + i * GAP);
       add(grid, 'line', { x1: X0, y1: gy, x2: X1, y2: gy });
-      add(yLab, 'text', { x: X0 - 8, y: gy + 4 }, (top - i * step).toFixed(2));
+      add(yLab, 'text', { x: X0 - 8, y: gy + AXIS_BASELINE }, (top - i * step).toFixed(2));
     }
     add(svg, 'line', { x1: X0, y1: BASE, x2: X1, y2: BASE, stroke: '#E0DDD6', 'stroke-width': '1' });
     // เส้นประแนวตั้งที่จุดล่าสุด — เน้นตำแหน่งประกาศปัจจุบัน
@@ -342,29 +377,32 @@
       })
       .filter(Boolean)
       .sort((a, b) => a.y - b.y);
-    const MIN_GAP = 24;
+    const MIN_GAP = TAIL_H + 2;   // เดิม 24 = 22 (สูงกล่อง) + 2 (ช่องว่าง) — ผูกสูตรกันหลุดจากกันเมื่อกล่องย่อ
     tails.forEach((t, i) => {
       // ty คือจุดกึ่งกลางกล่องแล้ว (เดิม t.y + 4 คือ baseline ของข้อความลอย) — ฐานจึงเปลี่ยนจาก t.y+4 เป็น t.y
       t.ty = i === 0 ? t.y : Math.max(t.y, tails[i - 1].ty + MIN_GAP);
     });
     // กันกล่องของเส้นบนสุด/ล่างสุดล้นขอบ SVG — ทำหลังจัดกันทับเสร็จเท่านั้น ไม่งั้นชนกับตัวจัดกันทับข้างบน
-    tails.forEach((t) => { t.ty = Math.min(Math.max(t.ty, TOP + 11), BASE - 11); });
+    // 11 เดิม = ครึ่งสูงกล่อง (22/2) — แทนด้วย TAIL_HH ให้ตามกล่องที่ย่อไปด้วย
+    tails.forEach((t) => { t.ty = Math.min(Math.max(t.ty, TOP + TAIL_HH), BASE - TAIL_HH); });
     const tailG = add(svg, 'g');
+    const TAIL_BASELINE = fs(4.5 * bodyScale);   // baseline offset ของตัวเลขในกล่อง เทียบกึ่งกลางกล่อง (เดิม 4.5)
     tails.forEach((t) => {
       add(tailG, 'rect', {
-        x: X1 + 7, y: t.ty - 11, width: 54, height: 22, rx: 6,
+        x: X1 + 7, y: t.ty - TAIL_HH, width: TAIL_W, height: TAIL_H, rx: TAIL_RX,
         fill: '#fff', stroke: t.color, 'stroke-opacity': '0.35',
       });
       add(tailG, 'text', {
-        x: X1 + 34, y: t.ty + 4.5, 'text-anchor': 'middle',
-        'font-size': '12.5', 'font-weight': '700', fill: t.color,
+        x: X1 + 7 + TAIL_W / 2, y: t.ty + TAIL_BASELINE, 'text-anchor': 'middle',
+        'font-size': FS_TAIL, 'font-weight': '700', fill: t.color,
       }, t.v.toFixed(2) + '%');
     });
 
     // ── ป้ายแกน X (วันที่ประกาศ) — บังคับให้มีจุดแรก+จุดสุดท้ายเสมอ ──
     // เลือกด้วย "ระยะห่างเป็นพิกเซล" ไม่ใช่ทุก ๆ n ลำดับ เพราะบนสเกลเวลาจริงประกาศที่ออกติด ๆ กัน
     // ไม่กี่วันจะอยู่เกือบทับกัน (การเว้นตามลำดับจึงยังเลือกป้ายที่ซ้อนกันมาได้)
-    const MIN_LABEL_GAP = 86;   // ~ความกว้างป้าย "25 เม.ย. 69" ที่ 11px + ช่องว่าง
+    // ~ความกว้างป้าย "25 เม.ย. 69" ที่ 11px + ช่องว่าง — เดิม 86 คงที่ สเกลตาม FS_AXIS ให้ตรงป้ายจริง
+    const MIN_LABEL_GAP = Math.round(86 * microScale);
     const picked = [];
     labels.forEach((lb, i) => {
       const px = x(i);
@@ -376,8 +414,9 @@
     while (picked.length > 2 && picked[picked.length - 1].px - picked[picked.length - 2].px < MIN_LABEL_GAP) {
       picked.splice(picked.length - 2, 1);
     }
-    const xLab = add(svg, 'g', { fill: '#8A8D93', 'font-size': '11', 'text-anchor': 'middle' });
-    picked.forEach((p) => add(xLab, 'text', { x: p.px, y: BASE + 17 }, p.lb));
+    const xLab = add(svg, 'g', { fill: '#8A8D93', 'font-size': FS_AXIS, 'text-anchor': 'middle' });
+    const XLAB_OFFSET = Math.round(17 * microScale);   // ระยะจากเส้นฐานถึง baseline ของป้าย (เดิม 17)
+    picked.forEach((p) => add(xLab, 'text', { x: p.px, y: BASE + XLAB_OFFSET }, p.lb));
 
     // ── ป้ายสรุปการเปลี่ยนแปลงครั้งล่าสุด (มุมขวาบนของการ์ด) — เฉพาะเส้นที่กำลังโชว์ ──
     // ไล่จากประกาศล่าสุดย้อนกลับไป หาครั้งแรกที่มีอัตราขยับ แล้วบอกทิศทาง + เดือนของประกาศนั้น
@@ -401,11 +440,21 @@
     const tip = add(svg, 'g', { style: 'pointer-events:none', visibility: 'hidden' });
     const tipDot = add(tip, 'circle', { r: '4' });   // ชี้จุดที่กำลังอ่านอยู่ — จำเป็นเพราะเมาส์ไม่ได้อยู่บนจุดจริงเสมอไป
     const tipBox = add(tip, 'rect', { rx: '9', fill: '#17181C' });
-    const tipDate = add(tip, 'text', { 'font-size': '11', 'font-weight': '600', fill: '#BFC3C9' });
+    const tipDate = add(tip, 'text', { 'font-size': FS_AXIS, 'font-weight': '600', fill: '#BFC3C9' });
     const tipSw = add(tip, 'rect', { width: '9', height: '9', rx: '2' });   // จุดสีในกล่อง (คนละตัวกับ tipDot ที่ชี้บนกราฟ)
-    const tipName = add(tip, 'text', { 'font-size': '12', 'font-weight': '600', fill: '#fff' });
-    const tipVal = add(tip, 'text', { 'font-size': '19', 'font-weight': '700', fill: '#fff' });
-    const tipDelta = add(tip, 'text', { 'font-size': '12' });
+    const tipName = add(tip, 'text', { 'font-size': FS_NAME, 'font-weight': '600', fill: '#fff' });
+    const tipVal = add(tip, 'text', { 'font-size': FS_VAL, 'font-weight': '700', fill: '#fff' });
+    const tipDelta = add(tip, 'text', { 'font-size': FS_NAME });
+
+    // ── ระยะบรรทัดในกล่อง tooltip (เทียบมุมบนกล่อง by=0) — ผูกกับฟอนต์แต่ละบรรทัดตามบทบาท ──
+    // ที่เดสก์ท็อป (bodyScale=microScale=valScale=1) ทุกค่าล่างนี้ลงตัวเท่าเลข hardcode เดิมเป๊ะ:
+    // TT_DATE_OFF=19, TT_NAME_OFF=35, TT_SW_OFF=27, TT_VAL_OFF=56, TT_DELTA_OFF=76, bh=86/66
+    const TT_DATE_OFF = Math.round(19 * microScale);              // บนกล่อง → บรรทัดวันที่
+    const TT_NAME_OFF = TT_DATE_OFF + Math.round(16 * bodyScale); // วันที่ → บรรทัดชื่อ
+    const TT_SW_OFF = TT_NAME_OFF - Math.round(8 * bodyScale);    // จุดสี (สูงกว่าบรรทัดชื่อเล็กน้อย)
+    const TT_VAL_OFF = TT_NAME_OFF + Math.round(21 * valScale);   // ชื่อ → บรรทัดค่า (ฟอนต์ใหญ่สุด)
+    const TT_DELTA_OFF = TT_VAL_OFF + Math.round(20 * valScale);  // ค่า → บรรทัดส่วนต่าง
+    const TT_BOTTOM_PAD = Math.round(10 * bodyScale);             // แพดดิ้งใต้บรรทัดสุดท้าย
 
     const hit = add(svg, 'rect', {
       x: 0, y: 0, width: W, height: H, fill: '#000', 'fill-opacity': '0',
@@ -438,7 +487,8 @@
       for (let i = best.i - 1; i >= 0; i--) { if (s.data[i] !== null) { prevV = s.data[i]; break; } }
       const hasDelta = prevV !== null;
       const delta = hasDelta ? best.v - prevV : 0;
-      const bh = hasDelta ? 86 : 66;   // ไม่มีค่าก่อนหน้าให้เทียบ = ไม่มีบรรทัดส่วนต่าง กล่องเตี้ยลง
+      // ไม่มีค่าก่อนหน้าให้เทียบ = ไม่มีบรรทัดส่วนต่าง กล่องเตี้ยลง (เดิม 86/66 คงที่ — ดูสูตร TT_* ด้านบน)
+      const bh = (hasDelta ? TT_DELTA_OFF : TT_VAL_OFF) + TT_BOTTOM_PAD;
 
       tipName.textContent = nameText;
       // 178 คับสำหรับป้ายผู้ฝากยาว ๆ — วัดความยาวจริงหลังตั้งข้อความชื่อแล้วค่อยขยาย เฉพาะเมื่อจำเป็น
@@ -451,16 +501,16 @@
       tipDot.setAttribute('cx', cx); tipDot.setAttribute('cy', cy); tipDot.setAttribute('fill', color);
       tipBox.setAttribute('x', bx); tipBox.setAttribute('y', by);
       tipBox.setAttribute('width', bw); tipBox.setAttribute('height', bh);
-      tipDate.setAttribute('x', bx + 13); tipDate.setAttribute('y', by + 19);
+      tipDate.setAttribute('x', bx + 13); tipDate.setAttribute('y', by + TT_DATE_OFF);
       tipDate.textContent = labels[best.i] || '';
-      tipSw.setAttribute('x', bx + 13); tipSw.setAttribute('y', by + 27); tipSw.setAttribute('fill', color);
-      tipName.setAttribute('x', bx + 28); tipName.setAttribute('y', by + 35);
-      tipVal.setAttribute('x', bx + 13); tipVal.setAttribute('y', by + 56);
+      tipSw.setAttribute('x', bx + 13); tipSw.setAttribute('y', by + TT_SW_OFF); tipSw.setAttribute('fill', color);
+      tipName.setAttribute('x', bx + 28); tipName.setAttribute('y', by + TT_NAME_OFF);
+      tipVal.setAttribute('x', bx + 13); tipVal.setAttribute('y', by + TT_VAL_OFF);
       tipVal.textContent = best.v.toFixed(2) + '%';
 
       if (hasDelta) {
         tipDelta.setAttribute('x', bx + 13);
-        tipDelta.setAttribute('y', by + 76);
+        tipDelta.setAttribute('y', by + TT_DELTA_OFF);
         if (Math.abs(delta) < 1e-9) {
           tipDelta.setAttribute('font-weight', '500'); tipDelta.setAttribute('fill', '#9B9EA4');
           tipDelta.textContent = 'ไม่เปลี่ยนจากครั้งก่อน';

@@ -52,6 +52,11 @@ THAI_MONTHS = {
 # ContextVar แยกกันต่อ thread อยู่แล้ว ธนาคารที่รันขนานกันจึงไม่ปนแท็กกัน
 _current_bank: contextvars.ContextVar[str] = contextvars.ContextVar("current_bank", default="")
 
+# วันที่มีผลของไฟล์ประกาศที่กำลังประมวลผลอยู่ใน thread นี้ — ตั้งด้วย file_log_context() ครอบเฉพาะช่วงที่
+# รู้วันที่แล้ว (backfill_bank วนหลายไฟล์ต่อธนาคาร, run_bank มีไฟล์เดียว) ช่วยหาว่า ERROR/WARNING ที่โผล่มา
+# ระหว่าง backfill เป็นของประกาศฉบับไหน — เดิมมีแต่แท็ก [CODE] บอกได้แค่ธนาคาร บอกไม่ได้ว่าไฟล์ไหน
+_current_file_date: contextvars.ContextVar[str] = contextvars.ContextVar("current_file_date", default="")
+
 
 @contextlib.contextmanager
 def bank_log_context(code: str):
@@ -63,10 +68,26 @@ def bank_log_context(code: str):
         _current_bank.reset(token)
 
 
-class _BankTagFilter(logging.Filter):
-    """เติมแท็ก [CODE] ให้ทุกบรรทัดที่ยังไม่มี — หน้าเว็บกรอง log รายธนาคารด้วยแท็กนี้ (tail_log)
+@contextlib.contextmanager
+def file_log_context(date_iso: str):
+    """ครอบการประมวลผลของไฟล์ประกาศฉบับหนึ่ง (ใช้ซ้อนอยู่ใน bank_log_context อีกที) — log ทุกบรรทัดที่เกิด
+    ข้างในจะได้แท็กวันที่ [YYYY-MM-DD] ต่อท้ายแท็ก [CODE] อัตโนมัติ (เฉพาะบรรทัดที่ยังไม่มีแท็ก [CODE] เอง —
+    ดู _BankTagFilter) ใช้คู่กับ error_tally_sink() เพื่อรู้ว่า ERROR ที่เกิดระหว่างทางเป็นของวันไหน"""
+    token = _current_file_date.set(date_iso or "")
+    try:
+        yield
+    finally:
+        _current_file_date.reset(token)
 
-    ติดไว้ที่ logger ไม่ใช่ที่ handler เพื่อให้ทำงานครั้งเดียวต่อ record (ไม่งั้นแท็กจะซ้ำ)
+
+class _BankTagFilter(logging.Filter):
+    """เติมแท็ก [CODE] [YYYY-MM-DD] ให้ทุกบรรทัดที่ยังไม่มีแท็ก [CODE] — หน้าเว็บกรอง log รายธนาคารด้วย
+    แท็ก [CODE] เท่านั้น (tail_log เช็ค f"[{bank}]" in msg) จึง**ต้องอยู่ติดกันเป็นแท็กแรกเสมอ ห้ามรวมกับ
+    วันที่เป็น [CODE DATE]** — แท็กวันที่ (ถ้ามี, มาจาก file_log_context) ต่อท้ายเป็นแท็กที่สองแยกวงเล็บ
+
+    ติดไว้ที่ logger ไม่ใช่ที่ handler เพื่อให้ทำงานครั้งเดียวต่อ record (ไม่งั้นแท็กจะซ้ำ) — เติมเฉพาะ
+    บรรทัดที่ยังไม่มีแท็ก [CODE] เอง (โค้ดหลายจุดใน rate_monitor.py ใส่ [{code}] เองในข้อความอยู่แล้ว
+    บรรทัดพวกนั้นมักมีวันที่อยู่ในข้อความเองด้วย จึงไม่ต้องเติมซ้ำ)
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -74,7 +95,41 @@ class _BankTagFilter(logging.Filter):
         if code:
             msg = str(record.msg)
             if not msg.lstrip().startswith(f"[{code}]"):
-                record.msg = f"[{code}] {msg}"
+                date = _current_file_date.get()
+                tag = f"[{code}] [{date}]" if date else f"[{code}]"
+                record.msg = f"{tag} {msg}"
+        return True
+
+
+# ─────────────────────────── สรุปปัญหาท้ายรอบ (error tally ต่อวันที่) ───────────────────────────
+# ใช้คู่กับ file_log_context — backfill_bank()/run_bank() เปิด sink ไว้ตลอดรอบ (หลายไฟล์/ไฟล์เดียว) แล้ว
+# นับ log record ระดับ ERROR ขึ้นไปสะสมต่อวันที่ (คีย์จาก _current_file_date ตอนที่ record นั้นถูกยิง) เพื่อ
+# เอาไปสรุปท้ายรอบว่าประกาศวันไหนมีปัญหาระหว่างอ่านบ้าง — ContextVar ต่อ thread เหมือนของข้างบน (ธนาคาร
+# รันขนานกันด้วย ThreadPool ห้ามใช้ตัวแปร global ธรรมดา) ไม่กระทบ log จริงที่ยังเขียนลงไฟล์/console ตามปกติ
+_error_tally: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar("error_tally", default=None)
+
+
+@contextlib.contextmanager
+def error_tally_sink():
+    """เปิด sink นับ ERROR ต่อวันที่ — คืน dict ที่ถูกเติมสดระหว่างทาง (อ่านค่าได้ตลอดโดยไม่ต้องรอ context จบ)"""
+    token = _error_tally.set({})
+    try:
+        yield _error_tally.get()
+    finally:
+        _error_tally.reset(token)
+
+
+class _ErrorTallyFilter(logging.Filter):
+    """นับ log record ระดับ ERROR ขึ้นไปต่อวันที่ประกาศ (จาก file_log_context) ลง sink ที่เปิดไว้ด้วย
+    error_tally_sink() — แยกหน้าที่จาก _BankTagFilter โดยเจตนา (ตัวนั้นแต่งข้อความ ตัวนี้แค่นับ ไม่แก้ record)
+    ไม่นับถ้าไม่มี sink เปิดอยู่ (เช่น เรียก extract_rates ตรง ๆ นอก backfill_bank/run_bank) หรือไม่มีวันที่"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.ERROR:
+            sink = _error_tally.get()
+            date = _current_file_date.get()
+            if sink is not None and date:
+                sink[date] = sink.get(date, 0) + 1
         return True
 
 
@@ -84,6 +139,7 @@ def _setup_logger() -> logging.Logger:
         return logger
     logger.setLevel(logging.DEBUG)
     logger.addFilter(_BankTagFilter())
+    logger.addFilter(_ErrorTallyFilter())
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     fh = logging.handlers.TimedRotatingFileHandler(
         LOG_PATH, when="D", interval=1, backupCount=90, encoding="utf-8"
@@ -218,7 +274,9 @@ def save_parse_cache(bank_code: str, cache: dict) -> None:
 # (ใช้ตรวจ/debug parser ได้ตรงไปตรงมา) ส่วนไฟล์นี้เป็นของคน ถ้าปนกันจะสืบไม่ได้ว่าเลขไหนมาจากไหน
 # backfill_bank()/run_bank() เรียก apply_manual() ทับค่าหลังได้ rates จาก cache/parse เสร็จเสมอ
 # จึงไม่ถูกล้างทิ้งตอน backfill สร้าง CSV ใหม่ทั้งไฟล์ (ต่างจากค่าที่เก็บใน CSV ตรง ๆ ซึ่งจะหายทุกรอบ)
-MANUAL_RATE_MIN, MANUAL_RATE_MAX = 0.0, 10.0   # ช่วงเดียวกับ MAX_PLAUSIBLE_RATE ที่ parser ใช้เช็ค
+# ช่วงค่าที่ยอมให้ "คน" กรอกเองได้ — กว้างกว่าเพดานของ parser แต่ละธนาคารโดยเจตนา (เช่น bbl.MAX_PLAUSIBLE_RATE
+# = 5.0 ที่ตั้งไว้แคบเพื่อจับ OCR อ่านหลักเกิน) เพราะคนที่นั่งเทียบ PDF อยู่รู้ดีกว่าเครื่องอ่านว่าค่าจริงคืออะไร
+MANUAL_RATE_MIN, MANUAL_RATE_MAX = 0.0, 10.0
 
 
 def manual_path(bank_code: str) -> str:

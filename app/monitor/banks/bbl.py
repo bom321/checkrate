@@ -43,6 +43,8 @@ Bot-protection: เว็บ BBL บล็อก TLS fingerprint ของ curl 
 → ต้องตั้ง "fetch_mode": "impersonate" ใน banks_config.json และใช้ curl_cffi ทุก request ที่นี่
 """
 
+import contextlib
+import contextvars
 import csv as csv_mod
 import hashlib
 import io
@@ -75,7 +77,17 @@ OCR_DPI = 300                # ต้นฉบับสแกน ~200 DPI คม
 OCR_TIMEOUT_SEC = 180
 MIN_WORD_CONF = 60.0         # ค่าที่อ่านได้จริงมี conf 76-95; ต่ำกว่า 60 = ไม่น่าเชื่อถือ ทิ้ง
 MIN_CLUSTER_MEMBERS = 5      # คอลัมน์จริงมีค่าหลายสิบตัว — cluster เล็กกว่านี้คือ noise จาก OCR
-MAX_PLAUSIBLE_RATE = 10.0
+# เพดานค่าที่ยอมรับจากการอ่านหนึ่งครั้ง — เดิม 10.0 กว้างเกินจนกันเคสจริงไม่อยู่: ประกาศ 30 ก.ค. 2568
+# OCR variant#2 อ่าน `0.60` (กองทุน 12 เดือน) เป็น `6.60` ด้วย conf ปกติ แล้วชนะเพราะมาก่อน variant ที่
+# อ่านถูก 5.0 ตัดเคสนี้ทิ้งได้โดยยังเหลือที่ว่างเยอะ — อัตราสูงสุดที่ BBL เคยประกาศในตารางนี้คือ 3.40
+# (ประจำบัวหลวงซุปเปอร์โบนัส) ค่าที่เกิน 5 จึงเป็นสัญญาณว่า OCR อ่านหลักแรกเกินมา ไม่ใช่อัตราจริง
+MAX_PLAUSIBLE_RATE = 5.0
+
+# ค่า 0.00 ที่อ่านได้ถือเป็น "ค่าสำรอง" ไม่ใช่คำตอบทันที — variant ที่อ่านตัวเลขหลุดหายทั้งตัวมักคืน 0.00
+# (เจอจริง: 30 ก.ค. 2568 variant#2 อ่าน `0.90` เป็น `0.00` ส่วน variant#3/#4 อ่านถูกทั้งคู่) จึงเก็บไว้ก่อน
+# แล้วไล่ variant ที่เหลือต่อ ถ้ามีตัวไหนอ่านได้ค่าที่ไม่ใช่ 0.00 ให้ตัวนั้นชนะ — ครบทุก variant แล้วยังมี
+# แต่ 0.00 ค่อยยอมรับ 0.00 (BBL ประกาศ 0.00 จริงในบางแถว เช่น กระแสรายวัน จึงห้ามตัดทิ้งเด็ดขาด)
+SUSPECT_RATE = 0.0
 
 # target โหมด max_tier/top_tier/max_all (①②③ "อัตราสูงสุด") เสี่ยงต่อ OCR อ่าน "สูงเกินจริง" เป็นพิเศษ
 # (พิสูจน์แล้วกับไฟล์จริง — ดู CLAUDE.md: variant[0] อ่าน 0.75 เป็น 0,76 conf 81 ผ่านเกณฑ์ MIN_WORD_CONF
@@ -108,6 +120,58 @@ OCR_VARIANTS: list[tuple] = [
 
 DEFAULT_DEPOSITOR = "บุคคลธรรมดา"
 EXPECTED_COLUMNS = 9
+
+# ─────────────────────────── Buffer เหตุผลระหว่างไล่ OCR variant (ตัดเสียงรบกวน log) ───────────────────────────
+# extract_rates() ไล่ลอง OCR_VARIANTS หลายชุด — ชุดก่อน ๆ ที่หา target ไม่เจอ/อ่านไม่ได้ไม่ใช่ error จริงเสมอ
+# ไป เพราะชุดถัดไปมักกู้ค่าคืนได้ (ดู docstring extract_rates) log.error จากทุกจุดที่เกิด "ต่อ variant ต่อ
+# target" (ใน _locate_row/_extract_targets) จึงต้องผ่าน _attempt_error() แทนการยิง log.error ตรง ๆ:
+#   - ถ้า extract_rates() เปิด buffer ไว้ (_ATTEMPT_BUFFER ไม่ใช่ None) → เก็บเหตุผลใส่ buffer ต่อ key แล้ว
+#     log.debug() แทน (ยังอยู่ในไฟล์ log ให้ดีบั๊กได้ เพราะ handler ไฟล์รับ DEBUG) ไม่รบกวนระดับ ERROR/WARNING
+#   - ถ้าไม่ได้เปิด buffer (เช่น debug_tiers() ที่ตั้งใจไม่เปิด — ต้องการพฤติกรรม log เดิมทุกตัวอักษร
+#     เพื่อตรวจตาก่อนติ๊กใช้จริง) → log.error() ตรง ๆ เหมือนเดิมทุกประการ
+# ContextVar (ไม่ใช่ตัวแปร global ธรรมดา) เพราะ backfill/main รันหลายธนาคารขนานกันด้วย ThreadPool
+_ATTEMPT_BUFFER: contextvars.ContextVar[dict[str, list[str]] | None] = contextvars.ContextVar(
+    "bbl_attempt_buffer", default=None)
+
+
+@contextlib.contextmanager
+def _attempt_buffering():
+    """เปิด buffer เก็บเหตุผลระหว่างไล่ OCR variant — ครอบเฉพาะใน extract_rates() (ไม่ใช่ debug_tiers())"""
+    token = _ATTEMPT_BUFFER.set({})
+    try:
+        yield
+    finally:
+        _ATTEMPT_BUFFER.reset(token)
+
+
+def _attempt_error(key: str, msg: str) -> None:
+    """log.error สำหรับ path "ต่อ variant ต่อ target" — key="" ใช้กับปัญหาระดับไฟล์ที่เกิดต่อ variant
+    เหมือนกันแต่ไม่ผูกกับ target ตัวใดตัวหนึ่ง (เช่น จับคอลัมน์ได้ไม่ครบ) ดูหมายเหตุเหนือ _ATTEMPT_BUFFER"""
+    buf = _ATTEMPT_BUFFER.get()
+    if buf is not None:
+        buf.setdefault(key, []).append(msg)
+        log.debug(msg)
+    else:
+        log.error(msg)
+
+
+def _buffered_reasons(key: str, limit: int = 3) -> str:
+    """เหตุผลที่สะสมไว้ของ key นี้ระหว่างไล่ variant (ตัดซ้ำ จำกัดจำนวน) + เหตุผลระดับไฟล์ (key="") ต่อท้าย
+    — ใช้พ่วงท้าย log.error สรุปตอนจบ extract_rates() เมื่อ key นั้นสุดท้ายอ่านไม่ได้จริง ๆ คืนสตริงว่างถ้า
+    ไม่มี buffer เปิดอยู่หรือไม่มีเหตุผลอะไรเก็บไว้เลย (ไม่มี prefix — ผู้เรียกจัดรูปประโยคเอง)"""
+    buf = _ATTEMPT_BUFFER.get()
+    if buf is None:
+        return ""
+    seen: list[str] = []
+    for msg in buf.get(key, []) + buf.get("", []):
+        if msg not in seen:
+            seen.append(msg)
+        if len(seen) >= limit:
+            break
+    if not seen:
+        return ""
+    return " / ".join(seen)
+
 
 # ─────────────────────────── Depositor column map (9 คอลัมน์ตายตัวของ BBL) ───────────────────────────
 DEPOSITOR_COLUMNS: dict[int, list[str]] = {
@@ -512,11 +576,11 @@ def _locate_row(lines: list[dict], target: dict, key: str) -> tuple[int | None, 
         sec_kw = section_kw or "ประจำ"
         start, end = _find_section(lines, sec_kw)
         if start is None:
-            log.error(f"extract_rates [{key}]: ไม่พบหมวด '{sec_kw}' ในตาราง — รูปแบบประกาศอาจเปลี่ยน")
+            _attempt_error(key, f"extract_rates [{key}]: ไม่พบหมวด '{sec_kw}' ในตาราง — รูปแบบประกาศอาจเปลี่ยน")
             return None, 0, ""
         idx, relaxed = _find_tenor_row(lines, start, end, tenor)
         if idx is None:
-            log.error(f"extract_rates [{key}]: ไม่พบแถว 'ระยะเวลาการฝาก {tenor} เดือน' ในหมวด '{sec_kw}'")
+            _attempt_error(key, f"extract_rates [{key}]: ไม่พบแถว 'ระยะเวลาการฝาก {tenor} เดือน' ในหมวด '{sec_kw}'")
             return None, 0, ""
         if relaxed:
             log.warning(f"extract_rates [{key}]: OCR อ่านหน่วยหลัง '{tenor}' ไม่ออกเป็น 'เดือน' "
@@ -527,17 +591,17 @@ def _locate_row(lines: list[dict], target: dict, key: str) -> tuple[int | None, 
         if section_kw:
             start, end = _find_section(lines, section_kw)
             if start is None:
-                log.error(f"extract_rates [{key}]: ไม่พบหมวด '{section_kw}' ในตาราง")
+                _attempt_error(key, f"extract_rates [{key}]: ไม่พบหมวด '{section_kw}' ในตาราง")
                 return None, 0, ""
         else:
             start, end = 0, len(lines)
         idx = _find_keyword_row(lines, start, end, row_kw)
         if idx is None:
-            log.error(f"extract_rates [{key}]: ไม่พบแถวชื่อ '{row_kw}' (เทียบชื่อแบบตรงตัวทั้งแถว)")
+            _attempt_error(key, f"extract_rates [{key}]: ไม่พบแถวชื่อ '{row_kw}' (เทียบชื่อแบบตรงตัวทั้งแถว)")
             return None, 0, ""
         return idx, end, row_kw
 
-    log.error(f"extract_rates [{key}]: ต้องระบุ tenor_months หรือ row_keyword อย่างน้อยหนึ่งอย่าง")
+    _attempt_error(key, f"extract_rates [{key}]: ต้องระบุ tenor_months หรือ row_keyword อย่างน้อยหนึ่งอย่าง")
     return None, 0, ""
 
 
@@ -555,8 +619,10 @@ def _extract_targets(lines: list[dict], targets: list[dict],
 
     cols = _column_centers(lines)
     if len(cols) != EXPECTED_COLUMNS:
-        log.error(f"bbl.extract_rates: จับคอลัมน์ได้ {len(cols)} คอลัมน์ (คาดว่า {EXPECTED_COLUMNS}) "
-                  f"— OCR/รูปแบบตารางผิดไปจากเดิม ไม่อ่านต่อกันได้ค่าผิดคอลัมน์")
+        # ไม่ผูกกับ target ตัวใดตัวหนึ่ง (คอลัมน์จับผิดกระทบทุก target ใน variant นี้เหมือนกันหมด) — เก็บ
+        # ใต้คีย์พิเศษ "" แล้วให้ extract_rates() พ่วงในบรรทัดสรุปท้ายสุดถ้าจบรอบแล้วยังมี target อ่านไม่ได้
+        _attempt_error("", f"bbl.extract_rates: จับคอลัมน์ได้ {len(cols)} คอลัมน์ (คาดว่า {EXPECTED_COLUMNS}) "
+                       f"— OCR/รูปแบบตารางผิดไปจากเดิม ไม่อ่านต่อกันได้ค่าผิดคอลัมน์")
         return {}, {}, [t["key"] for t in wanted]
 
     result: dict = {}
@@ -571,7 +637,7 @@ def _extract_targets(lines: list[dict], targets: list[dict],
             depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
             col = resolve_depositor(depositor_value)
             if col is None:
-                log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
+                _attempt_error(key, f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
                 failed.append(key); continue
 
             row_idx, end, row_desc = _locate_row(lines, target, key)
@@ -586,23 +652,23 @@ def _extract_targets(lines: list[dict], targets: list[dict],
             else:
                 tiers = _collect_tiers(lines, row_idx, end)
                 if not tiers:
-                    log.error(f"extract_rates [{key}]: แถว '{row_desc}' ไม่มีค่าอัตรา และไม่มีบรรทัดวงเงินย่อย "
-                              f"— ข้าม target นี้: {line['text'][:60]}")
+                    _attempt_error(key, f"extract_rates [{key}]: แถว '{row_desc}' ไม่มีค่าอัตรา และไม่มีบรรทัดวงเงินย่อย "
+                                   f"— ข้าม target นี้: {line['text'][:60]}")
                     failed.append(key); continue
                 line, tier_desc = _pick_tier(tiers, amount_m)
 
             rate, conf = _cell_value(line, cols, col)
             if rate is None:
-                log.error(f"extract_rates [{key}]: ไม่มีค่าในคอลัมน์ {col} ({depositor_value}) ของแถวนี้ "
-                          f"(อาจเป็น '-') — ข้าม target นี้: {line['text'][:60]}")
+                _attempt_error(key, f"extract_rates [{key}]: ไม่มีค่าในคอลัมน์ {col} ({depositor_value}) ของแถวนี้ "
+                               f"(อาจเป็น '-') — ข้าม target นี้: {line['text'][:60]}")
                 failed.append(key); continue
             if conf < MIN_WORD_CONF:
-                log.error(f"extract_rates [{key}]: OCR อ่านค่า {rate} ด้วยความมั่นใจต่ำ ({conf:.0f}% < "
-                          f"{MIN_WORD_CONF:.0f}%) — ไม่เชื่อถือ ข้าม target นี้")
+                _attempt_error(key, f"extract_rates [{key}]: OCR อ่านค่า {rate} ด้วยความมั่นใจต่ำ ({conf:.0f}% < "
+                               f"{MIN_WORD_CONF:.0f}%) — ไม่เชื่อถือ ข้าม target นี้")
                 failed.append(key); continue
             if not (0.0 <= rate <= MAX_PLAUSIBLE_RATE):
-                log.error(f"extract_rates [{key}]: ค่า {rate} อยู่นอกช่วงที่เป็นไปได้ (0-{MAX_PLAUSIBLE_RATE}) "
-                          f"— OCR น่าจะอ่านผิด ข้าม target นี้")
+                _attempt_error(key, f"extract_rates [{key}]: ค่า {rate} อยู่นอกช่วงที่เป็นไปได้ (0-{MAX_PLAUSIBLE_RATE}) "
+                               f"— OCR น่าจะอ่านผิด ข้าม target นี้")
                 failed.append(key); continue
 
             desc = f"{row_desc} · {tier_desc} · คอลัมน์ {col} ({depositor_value})"
@@ -614,7 +680,7 @@ def _extract_targets(lines: list[dict], targets: list[dict],
                 depositor_value = target.get("depositor", DEFAULT_DEPOSITOR)
                 col = resolve_depositor(depositor_value)
                 if col is None:
-                    log.error(f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
+                    _attempt_error(key, f"extract_rates [{key}]: ไม่รู้จัก depositor '{depositor_value}' — ข้าม target นี้")
                     failed.append(key); continue
 
             row_idx, end, row_desc = _locate_row(lines, target, key)
@@ -625,14 +691,14 @@ def _extract_targets(lines: list[dict], targets: list[dict],
             value_of = _make_value_of(cols)
             rate, mdesc = _maxscan.select(mode, tiers, col, DEPOSITOR_COLUMNS, value_of)
             if rate is None:
-                log.error(f"extract_rates [{key}]: {mdesc} (ค่าที่อ่านได้รอบนี้ — ยังไม่ผ่านโหวต) — ข้าม target นี้")
+                _attempt_error(key, f"extract_rates [{key}]: {mdesc} (ค่าที่อ่านได้รอบนี้ — ยังไม่ผ่านโหวต) — ข้าม target นี้")
                 failed.append(key); continue
 
             desc = f"{row_desc} · {mdesc}"
             log.info(f"  {target.get('label', key)}: {rate:.2f}%  ← {desc}  (รอบนี้ — รอโหวตข้าม OCR variant)")
 
         else:
-            log.error(f"extract_rates [{key}]: ไม่รู้จัก mode '{mode}' — ข้าม target นี้")
+            _attempt_error(key, f"extract_rates [{key}]: ไม่รู้จัก mode '{mode}' — ข้าม target นี้")
             failed.append(key); continue
 
         result[key] = rate
@@ -656,7 +722,9 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
     กลายเป็นคำตอบทันทีถ้าเชื่อ variant แรกที่อ่านได้เหมือน cell — พิสูจน์แล้วว่าเป็นเคสจริง ไม่ใช่ทฤษฎี ดู
     CLAUDE.md) จึงสะสม "โหวต" ต่อ key: ค่าที่ variant ต่าง ๆ อ่านได้ตรงกัน ≥ VOTE_MIN ครั้งจึงยอมรับ (ตัด
     ออกจาก remaining แล้วหยุดลองต่อสำหรับ key นั้น) ครบทุก variant แล้วยังไม่มีค่าใดถึง VOTE_MIN เสียง →
-    ปล่อยว่างไว้ ไม่เดา พร้อม log.error แจกแจงผู้สมัครทั้งหมดที่เจอ (rate: จำนวนเสียง)"""
+    ปล่อยว่างไว้ ไม่เดา พร้อม log.error แจกแจงผู้สมัครทั้งหมดที่เจอ (rate: จำนวนเสียง) — บรรทัดสรุปนี้พ่วง
+    เหตุผลที่สะสมไว้ระหว่างไล่ variant ต่อท้ายด้วย (ดู _attempt_error/_buffered_reasons) เพราะ log.error
+    ต่อ-variant ต่อ-target ระหว่างทางถูกลดเป็น log.debug ไปหมดแล้ว (ตัดเสียงรบกวน — ดู CLAUDE.md)"""
     targets = bank["rate_targets"]
     max_keys = {t["key"] for t in targets if t.get("mode", "cell") in _maxscan.MODES}
     result: dict = {}
@@ -664,57 +732,86 @@ def extract_rates(pdf_bytes: bytes, bank: dict) -> dict | None:
     remaining = {t["key"] for t in targets}
     # votes[key][rate] = (จำนวนเสียง, desc แรกที่ได้ค่านั้น) — เฉพาะ key ในกลุ่ม max_keys
     votes: dict[str, dict[float, tuple[int, str]]] = {}
+    # tentative[key] = (rate, desc, variant idx) — ค่าสำรองที่อ่านได้เป็น 0.00 (ดู SUSPECT_RATE)
+    tentative: dict[str, tuple[float, str, int]] = {}
 
-    for i, variant in enumerate(OCR_VARIANTS):
-        if not remaining:
-            break
-        lines = _page1_lines(pdf_bytes, variant)
-        if lines is None:
-            continue
-        r, tu, _ = _extract_targets(lines, targets, keys=remaining)
-        gained = set(r) & remaining
-        lang, psm, dpi = variant[:3]
-        tag = "" if i == 0 else f" (OCR variant สำรอง #{i}: {lang}/psm{psm}/{dpi}dpi)"
+    # เปิด buffer ครอบทั้งการไล่ variant และบรรทัดสรุปท้ายสุด (ต้องอ่าน _buffered_reasons ได้ก่อนปิด) —
+    # debug_tiers() ไม่เรียกฟังก์ชันนี้เลยจึงไม่มีทางเปิด buffer โดยไม่ตั้งใจ (พฤติกรรม log เดิมทุกตัวอักษร)
+    with _attempt_buffering():
+        for i, variant in enumerate(OCR_VARIANTS):
+            if not remaining:
+                break
+            lines = _page1_lines(pdf_bytes, variant)
+            if lines is None:
+                continue
+            r, tu, _ = _extract_targets(lines, targets, keys=remaining)
+            gained = set(r) & remaining
+            lang, psm, dpi = variant[:3]
+            tag = "" if i == 0 else f" (OCR variant สำรอง #{i}: {lang}/psm{psm}/{dpi}dpi)"
 
-        cell_gained = gained - max_keys
-        if cell_gained:
-            log.info(f"bbl: กู้ค่าได้ {len(cell_gained)} target เพิ่ม{tag}: {', '.join(sorted(cell_gained))}")
-        result.update({k: r[k] for k in cell_gained})
-        tiers_used.update({k: tu[k] for k in cell_gained})
-        remaining -= cell_gained
+            cell_gained = gained - max_keys
+            # ค่า 0.00 = "ค่าสำรอง" ไม่ตัดออกจาก remaining — ไล่ variant ที่เหลือต่อเผื่อมีตัวอ่านได้ค่าจริง
+            # (ดูหมายเหตุเหนือ SUSPECT_RATE) เก็บเฉพาะครั้งแรกที่เจอ ตัวหลังไม่ทับ = ลำดับ variant ยังชี้ขาด
+            # เหมือนเดิมถ้าสุดท้ายต้องใช้ค่าสำรองจริง ๆ
+            suspect = {k for k in cell_gained if r[k] == SUSPECT_RATE}
+            for k in suspect:
+                tentative.setdefault(k, (r[k], tu[k], i))
+            cell_gained -= suspect
+            if cell_gained:
+                log.info(f"bbl: กู้ค่าได้ {len(cell_gained)} target เพิ่ม{tag}: {', '.join(sorted(cell_gained))}")
+            result.update({k: r[k] for k in cell_gained})
+            tiers_used.update({k: tu[k] for k in cell_gained})
+            remaining -= cell_gained
 
-        # target โหมด max: สะสมโหวตแทนที่จะเชื่อ variant แรกที่อ่านได้ทันทีแบบ cell (ดู docstring)
-        confirmed = set()
-        for k in gained & max_keys:
-            bucket = votes.setdefault(k, {})
-            count, first_desc = bucket.get(r[k], (0, tu[k]))
-            bucket[r[k]] = (count + 1, first_desc)
-        for k in remaining & max_keys:
-            for rate, (count, desc) in votes.get(k, {}).items():
-                if count >= VOTE_MIN:
-                    result[k] = rate
-                    tiers_used[k] = f"{desc} · ยืนยันตรงกัน {count} OCR variant"
-                    confirmed.add(k)
-                    break
-        if confirmed:
-            log.info(f"bbl: โหมดอัตราสูงสุดยืนยันค่าได้{tag}: {', '.join(sorted(confirmed))}")
-        remaining -= confirmed
+            # target โหมด max: สะสมโหวตแทนที่จะเชื่อ variant แรกที่อ่านได้ทันทีแบบ cell (ดู docstring)
+            confirmed = set()
+            for k in gained & max_keys:
+                bucket = votes.setdefault(k, {})
+                count, first_desc = bucket.get(r[k], (0, tu[k]))
+                bucket[r[k]] = (count + 1, first_desc)
+            for k in remaining & max_keys:
+                for rate, (count, desc) in votes.get(k, {}).items():
+                    if count >= VOTE_MIN:
+                        result[k] = rate
+                        tiers_used[k] = f"{desc} · ยืนยันตรงกัน {count} OCR variant"
+                        confirmed.add(k)
+                        break
+            if confirmed:
+                log.info(f"bbl: โหมดอัตราสูงสุดยืนยันค่าได้{tag}: {', '.join(sorted(confirmed))}")
+            remaining -= confirmed
 
-    cell_remaining = remaining - max_keys
-    if cell_remaining:
-        log.error(f"extract_rates: อ่านค่าไม่ได้แม้ลองครบ {len(OCR_VARIANTS)} OCR variant: "
-                  f"{', '.join(sorted(cell_remaining))} — ปล่อยว่างไว้")
+        # ครบทุก variant แล้ว — key ที่มีแต่ค่าสำรอง 0.00 ค่อยยอมรับตอนนี้ (ไม่มี variant ไหนอ่านได้ค่าอื่นเลย
+        # = 0.00 น่าจะเป็นค่าจริงในประกาศ) ทำให้พฤติกรรมเดิมของไฟล์ที่ประกาศ 0.00 จริงไม่เปลี่ยนเลย
+        fallback = (remaining - max_keys) & set(tentative)
+        for k in sorted(fallback):
+            rate, desc, vi = tentative[k]
+            result[k] = rate
+            tiers_used[k] = desc
+            log.warning(f"extract_rates [{k}]: ทุก OCR variant อ่านได้แค่ {rate:.2f} — ใช้ค่านี้ "
+                        f"(อ่านได้ครั้งแรกที่ variant #{vi}) แต่ค่า 0.00 มักเกิดจาก OCR อ่านตัวเลขหลุด "
+                        f"ควรเทียบกับ PDF ด้วยตาก่อนเชื่อ")
+        remaining -= fallback
 
-    for k in sorted(remaining & max_keys):
-        bucket = votes.get(k, {})
-        if bucket:
-            candidates = ", ".join(f"{rate:g} ({count} เสียง)" for rate, (count, _) in
-                                    sorted(bucket.items(), key=lambda kv: -kv[1][0]))
-            log.error(f"extract_rates [{k}]: ไม่มีค่าที่ยืนยันได้ครบ {VOTE_MIN} เสียง (ต้องมี OCR variant "
-                      f"อ่านตรงกันอย่างน้อย {VOTE_MIN} ครั้ง) — ผู้สมัคร: {candidates} — ปล่อยว่างไว้")
-        else:
-            log.error(f"extract_rates [{k}]: ไม่มี OCR variant ใดอ่านค่าได้เลยแม้ครบ {len(OCR_VARIANTS)} "
-                      f"variant — ปล่อยว่างไว้")
+        cell_remaining = remaining - max_keys
+        if cell_remaining:
+            # แต่ละ key ในบรรทัดนี้อาจมีเหตุผลคนละชุด — พ่วงแยกต่อ key ด้วย "[key] เหตุผล" กันปนกัน
+            per_key = [f"[{k}] {_buffered_reasons(k)}" for k in sorted(cell_remaining) if _buffered_reasons(k)]
+            extra = f" — เหตุผลระหว่างไล่ OCR variant: {'; '.join(per_key)}" if per_key else ""
+            log.error(f"extract_rates: อ่านค่าไม่ได้แม้ลองครบ {len(OCR_VARIANTS)} OCR variant: "
+                      f"{', '.join(sorted(cell_remaining))} — ปล่อยว่างไว้{extra}")
+
+        for k in sorted(remaining & max_keys):
+            bucket = votes.get(k, {})
+            reasons = _buffered_reasons(k)
+            extra = f" — เหตุผลระหว่างไล่ OCR variant: {reasons}" if reasons else ""
+            if bucket:
+                candidates = ", ".join(f"{rate:g} ({count} เสียง)" for rate, (count, _) in
+                                        sorted(bucket.items(), key=lambda kv: -kv[1][0]))
+                log.error(f"extract_rates [{k}]: ไม่มีค่าที่ยืนยันได้ครบ {VOTE_MIN} เสียง (ต้องมี OCR variant "
+                          f"อ่านตรงกันอย่างน้อย {VOTE_MIN} ครั้ง) — ผู้สมัคร: {candidates} — ปล่อยว่างไว้{extra}")
+            else:
+                log.error(f"extract_rates [{k}]: ไม่มี OCR variant ใดอ่านค่าได้เลยแม้ครบ {len(OCR_VARIANTS)} "
+                          f"variant — ปล่อยว่างไว้{extra}")
 
     if not result:
         log.error("extract_rates: อ่านค่าไม่ได้เลยสักตัว (ทุก target ล้มเหลว)")

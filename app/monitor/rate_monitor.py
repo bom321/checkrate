@@ -29,6 +29,7 @@ from .common import (
     log, load_config, get_bank_paths,
     download_pdf, get_latest_csv_row, get_prev_rates, append_to_csv,
     check_warnings, write_result, send_email, bank_log_context,
+    file_log_context, error_tally_sink,
     build_new_rates_email, build_error_email, build_test_email,
 )
 from . import banks
@@ -110,6 +111,35 @@ def initialize_if_needed(bank: dict, pdf_dir: str, csv_path: str):
     summary = "  ".join(f"{t['key']}={rates[t['key']]:.2f}%" for t in bank["rate_targets"])
     log.info(f"[{bank['code']}] Baseline loaded: {eff_date}  {summary}")
 
+# ─────────────────────────── สรุปปัญหาการอ่านต่อประกาศหนึ่งฉบับ ───────────────────────────
+def _log_issue_line(code: str, date_iso: str, missing: list[str], applied: list[str],
+                    errors: int, indent: str = "") -> bool:
+    """พิมพ์บรรทัดสรุปของประกาศฉบับหนึ่ง — คืน True ถ้าพิมพ์จริง (มีปัญหา) · เงียบสนิทถ้าไม่มีปัญหาเลย
+
+    ใช้ร่วมกันระหว่าง run_bank() (ฉบับเดียว) กับ backfill_bank() (สรุปท้ายรอบ) เพื่อให้ **ทุกธนาคาร
+    ได้รูปแบบเดียวกันเป๊ะ** — เดิม ERROR ใน log ไม่บอกว่าเป็นประกาศฉบับไหน หาย้อนไม่ได้เวลาไล่หลายสิบไฟล์
+
+    missing = key ที่ parser อ่านไม่ได้ (**ก่อน**ค่าที่กรอกเองเข้ามาทับ) · applied = key ที่ถูกทับด้วยค่าที่
+    กรอกเอง · errors = จำนวน ERROR ที่เกิดระหว่างอ่านไฟล์นี้ (จาก common.error_tally_sink)
+    ระดับ log: ✗ = WARNING, ✓ = INFO — **ห้ามใช้ ERROR กับบรรทัดสรุปเอง** ไม่งั้น tally นับตัวเองซ้ำ"""
+    if missing:
+        filled = [k for k in missing if k in applied]
+        still  = [k for k in missing if k not in applied]
+        if not still:
+            tail = " → ใช้ค่าที่กรอกเองทับครบแล้ว"
+        elif filled:
+            tail = f" → กรอกเองทับ {len(filled)} · ยังว่าง: {', '.join(still)}"
+        else:
+            tail = " — ปล่อยว่างไว้ ไม่เดา"
+        log.warning(f"[{code}] {indent}{date_iso} · ✗ parser อ่านไม่ได้ {len(missing)} ค่า: "
+                    f"{', '.join(missing)}{tail}")
+        return True
+    if errors:
+        log.info(f"[{code}] {indent}{date_iso} · ✓ อ่านได้ครบ แต่มีข้อผิดพลาดระหว่างทาง {errors} รายการ")
+        return True
+    return False
+
+
 # ─────────────────────────── Per-Bank Workflow ───────────────────────────
 def _with_bank(fn, bank: dict, *args):
     """เรียกงานของธนาคารหนึ่งภายใต้ bank_log_context — log ทุกบรรทัดที่เกิดข้างใน
@@ -171,90 +201,100 @@ def run_bank(bank: dict):
 
     log.info(f"[{code}] Effective date: {eff_date}")
 
-    # 3. Compare
-    latest_row  = get_latest_csv_row(csv_path)
-    latest_date = latest_row["effective_date"] if latest_row else None
-    if latest_date == eff_date:
-        log.info(f"[{code}] No update. Latest: {eff_date}")
-        write_result("no_update", bank=code, effective_date=eff_date)
-        return
+    # ตั้งแต่จุดนี้เป็นต้นไป รู้ eff_date แล้ว — ครอบด้วย file_log_context ให้ log ทุกบรรทัดข้างในมีแท็ก
+    # [YYYY-MM-DD] กำกับ (ช่วยหาว่า ERROR เกิดกับประกาศฉบับไหน) และ error_tally_sink เก็บสถิติ ERROR
+    # ระหว่างทางไว้สรุปท้ายฟังก์ชัน (ดู "7. Warnings" ข้างล่าง)
+    with file_log_context(eff_date), error_tally_sink() as tally:
+        # 3. Compare
+        latest_row  = get_latest_csv_row(csv_path)
+        latest_date = latest_row["effective_date"] if latest_row else None
+        if latest_date == eff_date:
+            log.info(f"[{code}] No update. Latest: {eff_date}")
+            write_result("no_update", bank=code, effective_date=eff_date)
+            return
 
-    log.info(f"[{code}] New announcement: {eff_date}  (prev: {latest_date})")
+        log.info(f"[{code}] New announcement: {eff_date}  (prev: {latest_date})")
 
-    # 3.5 ตรวจสอบว่ามี PDF ของประกาศก่อนหน้าหรือไม่ ถ้าไม่มีให้ download
-    ensure_prev_pdf_exists(bank, pdf_dir, latest_date)
+        # 3.5 ตรวจสอบว่ามี PDF ของประกาศก่อนหน้าหรือไม่ ถ้าไม่มีให้ download
+        ensure_prev_pdf_exists(bank, pdf_dir, latest_date)
 
-    # 4. Extract
-    rates = banks.extract_rates(pdf_bytes, bank)
-    if rates is None:
-        err = "ไม่สามารถ extract อัตราดอกเบี้ยจาก PDF ได้"
-        log.error(f"[{code}] {err}")
-        ts = datetime.now().isoformat(timespec="seconds")
-        write_result("error", bank=code, step="rate_extraction", message=err, effective_date=eff_date)
-        send_email(*build_error_email(bank, "rate_extraction", err, ts))
-        return
+        # 4. Extract
+        rates = banks.extract_rates(pdf_bytes, bank)
+        if rates is None:
+            err = "ไม่สามารถ extract อัตราดอกเบี้ยจาก PDF ได้"
+            log.error(f"[{code}] {err}")
+            ts = datetime.now().isoformat(timespec="seconds")
+            write_result("error", bank=code, step="rate_extraction", message=err, effective_date=eff_date)
+            send_email(*build_error_email(bank, "rate_extraction", err, ts))
+            return
 
-    # 4.5 Manual override — ค่าที่ admin กรอกเองทับ (ถ้ามีของประกาศฉบับนี้) ต้องทำก่อนคำนวณ CSV/warnings
-    # ข้างล่างเสมอ ไม่งั้น target ที่กรอกแก้ไปแล้วจะยังโดนนับเป็น "อ่านไม่ได้" ต่อในขั้นตอน 7
-    rates, manual_applied = common.apply_manual(code, eff_date, rates)
-    if manual_applied:
-        log.info(f"[{code}] ใช้ค่าที่กรอกเองทับ {len(manual_applied)} รายการ: {', '.join(manual_applied)}")
+        # 4.5 Manual override — ค่าที่ admin กรอกเองทับ (ถ้ามีของประกาศฉบับนี้) ต้องทำก่อนคำนวณ CSV/warnings
+        # ข้างล่างเสมอ ไม่งั้น target ที่กรอกแก้ไปแล้วจะยังโดนนับเป็น "อ่านไม่ได้" ต่อในขั้นตอน 7
+        # เก็บไว้ก่อนทับ — บรรทัดสรุปท้ายฟังก์ชันรายงาน "parser อ่านไม่ได้กี่ค่า" (ก่อนค่าที่กรอกเองเข้ามาช่วย)
+        # ให้ความหมายตรงกับสรุปท้ายรอบของ backfill_bank() เป๊ะ
+        parsed_missing = [t["key"] for t in targets if t["key"] not in rates]
+        rates, manual_applied = common.apply_manual(code, eff_date, rates)
+        if manual_applied:
+            log.info(f"[{code}] ใช้ค่าที่กรอกเองทับ {len(manual_applied)} รายการ: {', '.join(manual_applied)}")
 
-    # 5. Save PDF
-    pdf_fname = f"{code.lower()}_deposit_{eff_date}.pdf"
-    try:
-        with open(os.path.join(pdf_dir, pdf_fname), "wb") as f:
-            f.write(pdf_bytes)
-        log.info(f"[{code}] PDF saved: {pdf_fname}")
-    except Exception as e:
-        err = f"ไม่สามารถบันทึก PDF: {e}"
-        log.error(f"[{code}] {err}")
-        ts = datetime.now().isoformat(timespec="seconds")
-        write_result("error", bank=code, step="save_pdf", message=err)
-        send_email(*build_error_email(bank, "save_pdf", err, ts))
-        return
+        # 5. Save PDF
+        pdf_fname = f"{code.lower()}_deposit_{eff_date}.pdf"
+        try:
+            with open(os.path.join(pdf_dir, pdf_fname), "wb") as f:
+                f.write(pdf_bytes)
+            log.info(f"[{code}] PDF saved: {pdf_fname}")
+        except Exception as e:
+            err = f"ไม่สามารถบันทึก PDF: {e}"
+            log.error(f"[{code}] {err}")
+            ts = datetime.now().isoformat(timespec="seconds")
+            write_result("error", bank=code, step="save_pdf", message=err)
+            send_email(*build_error_email(bank, "save_pdf", err, ts))
+            return
 
-    # 6. Update CSV
-    prev_rates = get_prev_rates(latest_row, targets)
-    try:
-        changes = append_to_csv(csv_path, eff_date, rates, prev_rates, targets)
-        log.info(f"[{code}] CSV updated: {csv_path}")
-    except Exception as e:
-        err = f"ไม่สามารถอัปเดต CSV: {e}"
-        log.error(f"[{code}] {err}")
-        ts = datetime.now().isoformat(timespec="seconds")
-        write_result("error", bank=code, step="csv_update", message=err)
-        send_email(*build_error_email(bank, "csv_update", err, ts))
-        return
+        # 6. Update CSV
+        prev_rates = get_prev_rates(latest_row, targets)
+        try:
+            changes = append_to_csv(csv_path, eff_date, rates, prev_rates, targets)
+            log.info(f"[{code}] CSV updated: {csv_path}")
+        except Exception as e:
+            err = f"ไม่สามารถอัปเดต CSV: {e}"
+            log.error(f"[{code}] {err}")
+            ts = datetime.now().isoformat(timespec="seconds")
+            write_result("error", bank=code, step="csv_update", message=err)
+            send_email(*build_error_email(bank, "csv_update", err, ts))
+            return
 
-    # 7. Warnings
-    warnings = check_warnings(rates, prev_rates, targets)
-    # target ที่ extract_rates() ข้ามไป (คืน dict แต่ไม่มี key นั้น) — ไม่ใช่ error ระดับไฟล์ (rates ยัง
-    # ไม่ใช่ None) แต่ค่านั้นถูกปล่อยว่างไว้จริง ไม่ได้เดา — generic ทุกธนาคาร ไม่ใช่แค่ BBL (parser ไหน
-    # ก็ข้าม target บางตัวได้เหมือนกัน)
-    missing = [t for t in targets if t["key"] not in rates]
-    if missing:
-        labels = ", ".join(t.get("label", t["key"]) for t in missing)
-        msg = f"อ่านค่าไม่ได้จากประกาศฉบับนี้ ({len(missing)} รายการ): {labels} — ช่องนี้ถูกปล่อยว่างไว้"
-        warnings.insert(0, msg)
-        log.warning(f"[{code}] {msg}")
+        # 7. Warnings
+        warnings = check_warnings(rates, prev_rates, targets)
+        # target ที่ extract_rates() ข้ามไป (คืน dict แต่ไม่มี key นั้น) — ไม่ใช่ error ระดับไฟล์ (rates ยัง
+        # ไม่ใช่ None) แต่ค่านั้นถูกปล่อยว่างไว้จริง ไม่ได้เดา — generic ทุกธนาคาร ไม่ใช่แค่ BBL (parser ไหน
+        # ก็ข้าม target บางตัวได้เหมือนกัน)
+        missing = [t for t in targets if t["key"] not in rates]
+        if missing:
+            labels = ", ".join(t.get("label", t["key"]) for t in missing)
+            msg = f"อ่านค่าไม่ได้จากประกาศฉบับนี้ ({len(missing)} รายการ): {labels} — ช่องนี้ถูกปล่อยว่างไว้"
+            warnings.insert(0, msg)
+            log.warning(f"[{code}] {msg}")
 
-    # 8. Write result + send email
-    write_result("new_rates", bank=code, effective_date=eff_date, prev_date=latest_date,
-                 rates={t["key"]: rates.get(t["key"]) for t in targets},
-                 prev_rates=prev_rates, changes=changes, warnings=warnings,
-                 pdf_filename=pdf_fname)
+        # สรุปปัญหาของประกาศฉบับนี้บรรทัดเดียว รูปแบบเดียวกับสรุปท้ายรอบของ backfill_bank() เป๊ะ
+        _log_issue_line(code, eff_date, parsed_missing, manual_applied, tally.get(eff_date, 0))
 
-    # แนบ PDF ประกาศไปกับอีเมลด้วย — จุดนี้จุดเดียวเท่านั้นที่ "มีประกาศใหม่จริง" และมี pdf_bytes อยู่ในมือ
-    # แล้วจากขั้นตอนที่ 5 (ไม่ต้องอ่านไฟล์ซ้ำจากดิสก์) ส่วน --backfill ไม่ส่งอีเมลอยู่แล้วจึงไม่มีไฟล์แนบ
-    # เช่นเดียวกับอีเมล error/test/OTP ที่ไม่เคยส่ง attachments เข้ามา
-    # ต้องรู้ผลก่อนเขียนเนื้อความ: ไฟล์ที่ใหญ่เกิน EMAIL_ATTACH_MAX_MB จะไม่ถูกแนบ (แต่อีเมลยังส่งตามปกติ)
-    # เนื้อความจึงต้องเปลี่ยนตามความจริงข้อนี้ ไม่ใช่เขียนว่า "แนบมาด้วยแล้ว" ไว้ก่อน
-    attach_ok = common.attachment_fits(pdf_fname, len(pdf_bytes))
-    subject, html = build_new_rates_email(bank, eff_date, latest_date, rates, prev_rates,
-                                          warnings, pdf_fname, attached=attach_ok)
-    send_email(subject, html, attachments=[(pdf_fname, pdf_bytes)] if attach_ok else None)
-    log.info(f"[{code}] Done.")
+        # 8. Write result + send email
+        write_result("new_rates", bank=code, effective_date=eff_date, prev_date=latest_date,
+                     rates={t["key"]: rates.get(t["key"]) for t in targets},
+                     prev_rates=prev_rates, changes=changes, warnings=warnings,
+                     pdf_filename=pdf_fname)
+
+        # แนบ PDF ประกาศไปกับอีเมลด้วย — จุดนี้จุดเดียวเท่านั้นที่ "มีประกาศใหม่จริง" และมี pdf_bytes อยู่ในมือ
+        # แล้วจากขั้นตอนที่ 5 (ไม่ต้องอ่านไฟล์ซ้ำจากดิสก์) ส่วน --backfill ไม่ส่งอีเมลอยู่แล้วจึงไม่มีไฟล์แนบ
+        # เช่นเดียวกับอีเมล error/test/OTP ที่ไม่เคยส่ง attachments เข้ามา
+        # ต้องรู้ผลก่อนเขียนเนื้อความ: ไฟล์ที่ใหญ่เกิน EMAIL_ATTACH_MAX_MB จะไม่ถูกแนบ (แต่อีเมลยังส่งตามปกติ)
+        # เนื้อความจึงต้องเปลี่ยนตามความจริงข้อนี้ ไม่ใช่เขียนว่า "แนบมาด้วยแล้ว" ไว้ก่อน
+        attach_ok = common.attachment_fits(pdf_fname, len(pdf_bytes))
+        subject, html = build_new_rates_email(bank, eff_date, latest_date, rates, prev_rates,
+                                              warnings, pdf_fname, attached=attach_ok)
+        send_email(subject, html, attachments=[(pdf_fname, pdf_bytes)] if attach_ok else None)
+        log.info(f"[{code}] Done.")
 
 # ─────────────────────────── Backfill ───────────────────────────
 def backfill_bank(bank: dict, year: int | None = None):
@@ -289,66 +329,91 @@ def backfill_bank(bank: dict, year: int | None = None):
     rows: list[dict] = []
     prev_rates = None
     success = cached = 0
-    for fname in pdf_files:
-        m = re.match(rf"{re.escape(prefix)}(\d{{4}}-\d{{2}}-\d{{2}})\.pdf", fname)
-        if not m:
-            continue
-        date_iso = m.group(1)
-        with open(os.path.join(pdf_dir, fname), "rb") as f:
-            pdf_bytes = f.read()
-        sha = hashlib.sha256(pdf_bytes).hexdigest()
+    problems: list[dict] = []   # สรุปปัญหาท้ายรอบ — เฉพาะไฟล์ที่ parse ใหม่จริงรอบนี้ (ดูข้างล่าง)
+    with error_tally_sink() as tally:
+        for fname in pdf_files:
+            m = re.match(rf"{re.escape(prefix)}(\d{{4}}-\d{{2}}-\d{{2}})\.pdf", fname)
+            if not m:
+                continue
+            date_iso = m.group(1)
+            with open(os.path.join(pdf_dir, fname), "rb") as f:
+                pdf_bytes = f.read()
+            sha = hashlib.sha256(pdf_bytes).hexdigest()
 
-        force = bool(year) and date_iso.startswith(f"{year}-")
-        hit = cache.get(fname)
-        rates = None
-        parsed_ok = False
-        if not force and hit and hit.get("sha256") == sha \
-                and hit.get("targets_sig") == tgt_sig and hit.get("parser_sig") == parser_sig:
-            rates = hit.get("rates")
-            parsed_ok = True
-            cached += 1
-            log.info(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → ใช้ผลจาก cache")
-        else:
-            t0 = time.monotonic()
-            rates = banks.extract_rates(pdf_bytes, bank)
-            took = time.monotonic() - t0
-            if rates is None:
-                # ไม่ continue ทันที — ไปเช็คค่าที่กรอกเอง (manual override) ก่อน เผื่อ admin กรอกทับไฟล์
-                # ที่ parser อ่านไม่ได้เลย (เช่น ฟอนต์ PDF พัง ไม่มี ToUnicode) rates={} ให้ apply_manual
-                # ข้างล่างมีของให้ทับ ถ้าไม่มี manual จริง ๆ ก็ยัง fail เหมือนเดิม (final_rates จะว่างแล้วข้าม)
-                log.warning(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → ⚠ ไม่พบอัตรา ({took:.1f}s) "
-                            f"— เช็คค่าที่กรอกเอง (manual override) ก่อนข้าม")
-                rates = {}
-            else:
-                parsed_ok = True
-                summary = "  ".join(f"{t['key']}={rates[t['key']]:.2f}%"
-                                    for t in targets if t["key"] in rates)
-                log.info(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → {summary} [อ่านใหม่ {took:.1f}s]")
+            # ครอบด้วย file_log_context ให้ log ทุกบรรทัดของไฟล์นี้มีแท็ก [YYYY-MM-DD] กำกับ — ช่วยหาว่า
+            # ERROR ที่โผล่มาระหว่าง backfill (วนหลายสิบไฟล์) เป็นของประกาศฉบับไหน
+            with file_log_context(date_iso):
+                force = bool(year) and date_iso.startswith(f"{year}-")
+                hit = cache.get(fname)
+                rates = None
+                parsed_ok = False
+                from_cache = False
+                if not force and hit and hit.get("sha256") == sha \
+                        and hit.get("targets_sig") == tgt_sig and hit.get("parser_sig") == parser_sig:
+                    rates = hit.get("rates")
+                    parsed_ok = True
+                    from_cache = True
+                    cached += 1
+                    log.info(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → ใช้ผลจาก cache")
+                else:
+                    t0 = time.monotonic()
+                    rates = banks.extract_rates(pdf_bytes, bank)
+                    took = time.monotonic() - t0
+                    if rates is None:
+                        # ไม่ continue ทันที — ไปเช็คค่าที่กรอกเอง (manual override) ก่อน เผื่อ admin กรอกทับไฟล์
+                        # ที่ parser อ่านไม่ได้เลย (เช่น ฟอนต์ PDF พัง ไม่มี ToUnicode) rates={} ให้ apply_manual
+                        # ข้างล่างมีของให้ทับ ถ้าไม่มี manual จริง ๆ ก็ยัง fail เหมือนเดิม (final_rates จะว่างแล้วข้าม)
+                        log.warning(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → ⚠ ไม่พบอัตรา ({took:.1f}s) "
+                                    f"— เช็คค่าที่กรอกเอง (manual override) ก่อนข้าม")
+                        rates = {}
+                    else:
+                        parsed_ok = True
+                        summary = "  ".join(f"{t['key']}={rates[t['key']]:.2f}%"
+                                            for t in targets if t["key"] in rates)
+                        log.info(f"[{code}] Backfill: ประกาศ {date_iso} ({fname}) → {summary} [อ่านใหม่ {took:.1f}s]")
 
-        if parsed_ok:
-            # cache เก็บ 'rates' ดิบ (ผล OCR ล้วน) — apply_manual ทีหลังเสมอ ไม่งั้น cache จะปนค่าที่คนกรอก
-            # เข้าไป แล้วสืบไม่ได้อีกว่าเลขไหนมาจากเครื่องอ่าน เลขไหนมาจากคน (ดู common.py หัวข้อ manual override)
-            # — ไม่ cache ไฟล์ที่ parser อ่านไม่ได้เลย กันรอบถัดไปนึกว่าพาร์สสำเร็จทั้งที่จริงมาจาก manual ล้วน ๆ
-            new_cache[fname] = {"sha256": sha, "targets_sig": tgt_sig,
-                                "parser_sig": parser_sig, "rates": rates}
+                if parsed_ok:
+                    # cache เก็บ 'rates' ดิบ (ผล OCR ล้วน) — apply_manual ทีหลังเสมอ ไม่งั้น cache จะปนค่าที่คนกรอก
+                    # เข้าไป แล้วสืบไม่ได้อีกว่าเลขไหนมาจากเครื่องอ่าน เลขไหนมาจากคน (ดู common.py หัวข้อ manual override)
+                    # — ไม่ cache ไฟล์ที่ parser อ่านไม่ได้เลย กันรอบถัดไปนึกว่าพาร์สสำเร็จทั้งที่จริงมาจาก manual ล้วน ๆ
+                    new_cache[fname] = {"sha256": sha, "targets_sig": tgt_sig,
+                                        "parser_sig": parser_sig, "rates": rates}
 
-        final_rates, applied = common.apply_manual(code, date_iso, rates)
-        if applied:
-            log.info(f"[{code}] Backfill: ประกาศ {date_iso} → ใช้ค่าที่กรอกเองทับ {len(applied)} รายการ: "
-                     f"{', '.join(applied)}")
-        if not final_rates:
-            continue  # parser อ่านไม่ได้เลยและไม่มี manual มาช่วย — ไม่มีอะไรจะเขียนลง CSV จริง ๆ
+                final_rates, applied = common.apply_manual(code, date_iso, rates)
+                if applied:
+                    log.info(f"[{code}] Backfill: ประกาศ {date_iso} → ใช้ค่าที่กรอกเองทับ {len(applied)} รายการ: "
+                             f"{', '.join(applied)}")
 
-        row, _ = common.build_csv_row(date_iso, final_rates, prev_rates, targets)
-        rows.append(row)
-        prev_rates = {t["key"]: final_rates[t["key"]] for t in targets if t["key"] in final_rates}
-        success += 1
+                # เก็บไว้สรุปท้ายรอบ — เฉพาะไฟล์ที่ parse ใหม่จริงรอบนี้ (cache hit ไม่มี log ระหว่างทาง
+                # เกิดขึ้นเลยรอบนี้ จึงไม่มีอะไรให้สรุปซ้ำ) เงื่อนไข "มีปัญหา" = มี target ขาดค่า หรือมี ERROR
+                # โผล่มาระหว่างทาง (นับจาก error_tally_sink — ดู common.py)
+                if not from_cache:
+                    missing_keys = sorted(t["key"] for t in targets if t["key"] not in (rates or {}))
+                    err_count = tally.get(date_iso, 0)
+                    if missing_keys or err_count:
+                        problems.append({"date": date_iso, "missing": missing_keys,
+                                         "applied": applied, "errors": err_count})
+
+            if not final_rates:
+                continue  # parser อ่านไม่ได้เลยและไม่มี manual มาช่วย — ไม่มีอะไรจะเขียนลง CSV จริง ๆ
+
+            row, _ = common.build_csv_row(date_iso, final_rates, prev_rates, targets)
+            rows.append(row)
+            prev_rates = {t["key"]: final_rates[t["key"]] for t in targets if t["key"] in final_rates}
+            success += 1
 
     # เขียนทีเดียวตอนจบ — ถูกฆ่ากลางคันแล้ว CSV เดิมไม่พัง (เดิม truncate ก่อน parse)
     common.write_csv_atomic(csv_path, rows, targets)
     common.save_parse_cache(code, new_cache)
     log.info(f"[{code}] Backfill: เสร็จสิ้น {success}/{len(pdf_files)} ไฟล์ "
              f"(จาก cache {cached}, อ่านใหม่ {success - cached}) → {os.path.basename(csv_path)}")
+
+    # สรุปท้ายรอบ — ต่อจากบรรทัด "เสร็จสิ้น" ข้างบนเสมอ (ห้ามแก้บรรทัดนั้น) พิมพ์เฉพาะเมื่อมีปัญหาจริง
+    # เรียงตามวันที่ · รูปแบบบรรทัดมาจาก _log_issue_line() ตัวเดียวกับที่ run_bank() ใช้ (ทุกธนาคารเหมือนกัน)
+    if problems:
+        log.info(f"[{code}] ── สรุปการอ่าน: มีปัญหา {len(problems)} ฉบับ จาก {len(pdf_files)} ไฟล์ ──")
+        for p in sorted(problems, key=lambda x: x["date"]):
+            _log_issue_line(code, p["date"], p["missing"], p["applied"], p["errors"], indent="  ")
 
 # ─────────────────────────── Main (parallel) ───────────────────────────
 def _filter_only(banks_list: list[dict], only: set[str] | None) -> list[dict]:

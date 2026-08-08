@@ -14,6 +14,9 @@ __pycache__/
 .deploy_failed
 handover.md
 CLAUDE.md
+# การตั้งค่าผู้ช่วย AI ของเครื่องนี้ (นิยาม subagent + permission เฉพาะเครื่อง) — ไม่เกี่ยวกับตัวแอป
+# ที่รันบน NAS เก็บไว้เฉพาะเครื่องพัฒนา
+.claude/
 backup/
 Finance app redesign/
 # **ห้ามใส่ `scripts/` กลับเข้า ignore** — scripts/update.sh คือ deploy path หลักที่รันบน NAS จริง

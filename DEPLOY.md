@@ -347,6 +347,42 @@ cd checkrate && cp .env.example .env    # แล้วแก้ .env ตาม�
 - `scripts/` อยู่ใน git แล้ว (ตั้งแต่ ส.ค. 2569) — แก้บน Mac แล้ว `git pull` บน NAS ได้ของใหม่เลย
   ไม่ต้อง copy มือเหมือนเดิม
 
+### แจ้งเตือน stopped unexpectedly
+
+ทุกครั้งที่ deploy DSM จะส่งอีเมล/แจ้งเตือนว่า:
+
+> Container checkrate stopped unexpectedly. Go to Container Manager for more information.
+
+**เป็นสัญญาณเท็จ ไม่ใช่ของพัง** — Container Manager เฝ้าดู event ของ docker เองและเก็บ "สถานะที่ควรเป็น"
+ไว้ในฐานข้อมูลของตัวเอง คอนเทนเนอร์ที่ดับโดยที่ DSM ไม่ได้เป็นคนสั่ง (`docker-compose up -d` ตอน
+recreate = `docker stop` + `rm`) จึงถูกตีเป็นดับเอง **ไม่เกี่ยวกับ exit code และไม่เกี่ยวกับว่า deploy
+สำเร็จหรือไม่** ปล่อยไว้แล้วปัญหาคือวันที่คอนเทนเนอร์ตายเองจริง ๆ อีเมลจะหน้าตาเหมือนกันเป๊ะ จนแยกไม่ออก
+
+`update.sh` แก้ให้แล้วโดยสั่งหยุดผ่าน API ของ DSM เองก่อน (`synowebapi` → DSM บันทึกว่า "ผู้ใช้สั่งหยุด")
+แล้วปล่อยให้ compose สร้างตัวใหม่ตามปกติ — **การแจ้งเตือนของเคสตายเองจริงยังอยู่ครบ** ต่างจากการไปปิด
+event นี้ทิ้งใน Control Panel → Notification
+
+แต่ `synowebapi` เรียกได้เฉพาะ `root` ขณะที่ task นี้ตั้งใจรันเป็น `bom321` (ดูตารางข้างบนว่าทำไม)
+จึงต้องเปิดสิทธิ์ให้หนึ่งคำสั่ง **ตั้งครั้งเดียวบน NAS** (SSH เข้าไปแล้ว):
+
+```bash
+echo 'bom321 ALL=(root) NOPASSWD: /usr/syno/bin/synowebapi --exec api=SYNO.Docker.Container version=1 method=stop name=checkrate' \
+  | sudo tee /etc/sudoers.d/checkrate-synowebapi
+sudo chmod 0440 /etc/sudoers.d/checkrate-synowebapi
+sudo -l -U bom321 | grep synowebapi          # ยืนยันว่ากฎติดแล้ว
+```
+
+- **กฎนี้ปักคำสั่งไว้ตายตัว ไม่มี wildcard โดยเจตนา** — `name=*` จะเปิดช่องให้ยัด argument อื่นต่อท้าย
+  แล้วเรียก API อะไรก็ได้ด้วยสิทธิ์ root กลายเป็นช่องยกระดับสิทธิ์ ถ้าเปลี่ยนชื่อคอนเทนเนอร์
+  (`CONTAINER` ใน `update.sh`) ต้องแก้บรรทัดนี้ตามด้วย และรูปแบบ argument ต้องตรงกับที่สคริปต์เรียก
+  เป๊ะ ๆ (`name=checkrate` ไม่มีเครื่องหมายคำพูดซ้อน)
+- **ไม่ตั้งก็ได้ ไม่มีอะไรพัง** — สคริปต์ fail-open: เรียกไม่ได้จะเตือนใน log แล้ว deploy ต่อตามปกติ
+  ผลที่ตามมาคือได้แจ้งเตือนของ DSM เหมือนเดิมเท่านั้น
+- ถ้าแจ้งเตือนกลับมาหลังอัปเกรด DSM ให้เช็คว่าไฟล์ใน `/etc/sudoers.d/` ยังอยู่ (DSM major upgrade
+  เคยล้างทิ้ง) และ `/usr/syno/bin/synowebapi` ยังอยู่ที่เดิม
+- เจอ `sudo: no tty present` ใน `update.log` = sudoers ของเครื่องตั้ง `requiretty` ไว้ เพิ่มบรรทัด
+  `Defaults:bom321 !requiretty` ในไฟล์เดียวกัน
+
 ---
 
 ## ขั้นตอนที่ 7 — ทดสอบ

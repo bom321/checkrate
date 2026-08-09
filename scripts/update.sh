@@ -1,6 +1,7 @@
 #!/bin/sh
 # update.sh — อัปเดต CheckRate บน Synology:
 #   git pull → build (ยังไม่แตะคอนเทนเนอร์ที่รันอยู่) → preflight → restart → เช็คว่าเว็บขึ้นจริง
+#   (ขั้น restart หยุดคอนเทนเนอร์ผ่าน API ของ DSM ก่อน — ดู syno_stop_container ว่าทำไม)
 #
 # ลำดับนี้ตั้งใจให้ "ของที่รันอยู่ตอนนี้" รอดไว้ให้นานที่สุด — บทเรียนจาก ส.ค. 2569 ที่ deploy แล้ว
 # คอนเทนเนอร์เขียน /data ไม่ได้ (Synology ACL) กลายเป็น restart loop และเว็บดับยาวหลายชั่วโมง
@@ -41,6 +42,67 @@ log() {
 die() {
     log "❌ ล้มเหลว: $*"
     exit 1
+}
+
+# ── หยุดคอนเทนเนอร์ "แบบที่ DSM รู้เห็น" ──
+# Container Manager ของ DSM เฝ้าดู docker event เองและเก็บ "สถานะที่ควรเป็น" ไว้ในฐานข้อมูลของตัวเอง
+# คอนเทนเนอร์ที่ดับโดยที่ DSM ไม่ได้เป็นคนสั่ง (compose recreate ตอน deploy = docker stop + rm) จึงถูก
+# ตีเป็นดับเอง แล้วยิงแจ้งเตือน "Container checkrate stopped unexpectedly." ทุกครั้งที่อัปเดต
+# — ไม่เกี่ยวกับ exit code และไม่เกี่ยวกับว่าเว็บขึ้นหรือไม่ (deploy สำเร็จก็ได้อีเมลนี้)
+# สัญญาณเท็จรายสัปดาห์แบบนี้กลบของจริงทิ้ง: วันที่คอนเทนเนอร์ตายเองจริง ๆ อีเมลจะหน้าตาเหมือนกันเป๊ะ
+#
+# สั่งผ่าน API ของ DSM เองก่อน = DSM บันทึกว่า "ผู้ใช้สั่งหยุด" แล้วไม่แจ้งเตือน ส่วนการ start ตัวใหม่
+# compose ทำต่อตามปกติ (การสร้าง/สตาร์ทไม่มีการแจ้งเตือน) — **เก็บการแจ้งเตือนของเคสตายเองจริงไว้ครบ**
+# ต่างจากการไปปิด event นี้ทิ้งใน Control Panel → Notification
+#
+# `synowebapi` เรียกได้เฉพาะ root แต่ task นี้ตั้งใจรันเป็นผู้ใช้ปกติ (DEPLOY.md อธิบายเหตุผลไว้ —
+# รันเป็น root แล้วไฟล์ใน git repo บนโฟลเดอร์ ACL กลายเป็นของ root จนพังมาแล้วครั้งหนึ่ง) จึงต้องผ่าน
+# `sudo -n` กับกฎ NOPASSWD หนึ่งบรรทัดที่ปักคำสั่งไว้ตายตัว — วิธีตั้งอยู่ใน DEPLOY.md
+# **fail-open ทุกกรณี**: เรียกไม่ได้/ไม่มีไบนารี/ไม่มีสิทธิ์ = เตือนแล้ว deploy ต่อตามปกติ
+# (ผลที่ตามมาแค่ได้แจ้งเตือนเหมือนเดิม ไม่คุ้มที่จะทำให้ deploy ทั้งกระบวนหยุด)
+SYNOWEBAPI="${SYNOWEBAPI:-/usr/syno/bin/synowebapi}"
+
+container_running() {
+    [ "$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || echo false)" = "true" ]
+}
+
+# คืน 0 เมื่อหยุดสำเร็จ (หรือหยุดอยู่แล้ว) — ผู้เรียกไม่ต้องสนใจผล เพราะ compose หยุดเองได้อยู่แล้ว
+syno_stop_container() {
+    container_running || return 0
+
+    if [ ! -x "$SYNOWEBAPI" ]; then
+        log "  (ไม่พบ ${SYNOWEBAPI} — ไม่ใช่ DSM หรือ path เปลี่ยน) ปล่อยให้ compose หยุดเอง"
+        return 1
+    fi
+
+    if [ "$(id -u)" = "0" ]; then
+        set -- "$SYNOWEBAPI"
+    else
+        set -- sudo -n "$SYNOWEBAPI"
+    fi
+
+    log "สั่งหยุด ${CONTAINER} ผ่าน API ของ DSM (กันแจ้งเตือน stopped unexpectedly)…"
+    # **ห้ามใส่เครื่องหมายคำพูดซ้อนใน name=** — argv ต้องเป็น `name=checkrate` เป๊ะ ๆ ทั้งเพราะกฎ sudoers
+    # ปักคำสั่งไว้ตายตัว (ไม่มี wildcard = ไม่เปิดช่องให้ยกระดับสิทธิ์) และเพราะ synowebapi เตือน
+    # "Not a json value" ถ้ารูปแบบไม่ตรง · ลำดับ/หน้าตาของ argv ตรงนี้ต้องตรงกับใน DEPLOY.md เสมอ
+    if ! "$@" --exec api=SYNO.Docker.Container version=1 method=stop "name=${CONTAINER}" \
+            >>"$LOG_FILE" 2>&1; then
+        log "  ⚠️ เรียก synowebapi ไม่สำเร็จ (รันเป็น $(id -un 2>/dev/null || id -u) · ดูรายละเอียดใน ${LOG_FILE})"
+        log "     ตั้งกฎ sudo แบบไม่ถามรหัสให้ก่อน — ดู DEPLOY.md หัวข้อ \"แจ้งเตือน stopped unexpectedly\""
+        log "     deploy ต่อตามปกติ — ผลที่ตามมาคือได้แจ้งเตือนของ DSM เหมือนเดิมเท่านั้น"
+        return 1
+    fi
+
+    i=0
+    while container_running && [ "$i" -lt 20 ]; do
+        i=$((i + 1))
+        sleep 1
+    done
+    if container_running; then
+        log "  ⚠️ ผ่านไป 20 วิแล้วยังไม่หยุด — ไปต่อ ปล่อยให้ compose จัดการเอง"
+        return 1
+    fi
+    log "  ✅ หยุดแล้ว (compose จะสร้างตัวใหม่ต่อจากนี้)"
 }
 
 cd "$PROJECT_DIR"
@@ -259,8 +321,17 @@ else
 fi
 
 # ── 6. restart ──
+# หยุดผ่าน API ของ DSM ก่อน **หลัง build/preflight ผ่านแล้วเท่านั้น** — ขั้นก่อนหน้านี้ทุกขั้นออกแบบให้
+# die ทิ้งตอนที่ของเดิมยังรันอยู่ ถ้าย้ายขึ้นไปหยุดก่อนก็เสียหลักนั้นไปเปล่า ๆ
 log "กำลัง restart คอนเทนเนอร์…"
-$COMPOSE up -d >>"$LOG_FILE" 2>&1 || die "docker-compose up -d ไม่สำเร็จ (ดูรายละเอียดใน ${LOG_FILE})"
+syno_stop_container || true
+if ! $COMPOSE up -d >>"$LOG_FILE" 2>&1; then
+    # เราหยุดคอนเทนเนอร์เองไปก่อนหน้านี้ — ถ้า up -d ล้ม เว็บจะดับค้างแทนที่จะรันของเดิมต่อ
+    # ลองสตาร์ทคืนก่อนตาย (compose ลบตัวเดิมไปแล้วก็แค่ล้มเหลวเงียบ ๆ ไม่มีอะไรเสียหาย)
+    log "up -d ไม่สำเร็จ — ลองสตาร์ทคอนเทนเนอร์คืนก่อน"
+    docker start "$CONTAINER" >>"$LOG_FILE" 2>&1 || true
+    die "docker-compose up -d ไม่สำเร็จ (ดูรายละเอียดใน ${LOG_FILE})"
+fi
 
 # ── 7. ยืนยันว่าเว็บขึ้นจริง ไม่ใช่แค่คอนเทนเนอร์ start แล้ว crash ──
 # แยกเป็นฟังก์ชันเพราะขั้น 8 ต้องเรียกซ้ำหลังถอยกลับ — **ตรรกะข้างในเหมือนเดิมทุกบรรทัด**
@@ -328,6 +399,9 @@ if [ "$BEFORE" != "$AFTER" ] && [ "${AUTO_ROLLBACK:-1}" = "1" ]; then
         APP_BUILD_DATE="$($GIT log -1 --format=%cI HEAD)"
         export APP_COMMIT APP_BUILD_DATE
 
+        # ตัวที่รันอยู่ตอนนี้คือของใหม่ที่พังไปแล้ว (แจ้งเตือนของ DSM จากการที่มันตายเองยิงไปแล้วตามจริง)
+        # หยุดผ่าน API ก่อน recreate เพื่อไม่ให้มีใบที่สองที่เป็นสัญญาณเท็จตามมาอีก
+        syno_stop_container || true
         if $COMPOSE up -d --build >>"$LOG_FILE" 2>&1 && wait_healthy; then
             log "✅ ถอยกลับสำเร็จ — เว็บกลับมาเป็น commit ${BEFORE} แล้ว"
             log "   commit ${AFTER} ถูกกันไว้ใน ${FAILED_FILE} จะไม่ถูก deploy ซ้ำจนกว่าจะลบไฟล์นั้นทิ้ง"

@@ -42,7 +42,10 @@ from datetime import datetime
 #         (ที่จองไว้เดิมอยู่ผิด element ทำให้ป้ายเวอร์ชัน/ปรับปรุงล่าสุดถูกทับ 100% ทุกหน้า) ·
 #         เมนูบนไม่ตกสองบรรทัดบน iPhone แนวนอน/iPad แนวตั้ง (ซ่อน subtitle ตั้งแต่ ≤1080) ·
 #         กล่องความสูงคงที่ (กราฟ/log/แผงอีเมล) ย่อบนจอเตี้ยด้วย @media (max-height: 500px)
-VERSION = "1.1.5"
+# 1.1.6 = deploy: update.sh สั่งหยุดคอนเทนเนอร์ผ่าน API ของ DSM (synowebapi) ก่อน recreate — DSM เลิกส่ง
+#         "Container checkrate stopped unexpectedly" ทุกครั้งที่อัปเดต โดยยังเก็บแจ้งเตือนของเคสที่
+#         คอนเทนเนอร์ตายเองจริงไว้ครบ (ต้องตั้งกฎ sudo หนึ่งบรรทัดบน NAS — ดู DEPLOY.md)
+VERSION = "1.1.6"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

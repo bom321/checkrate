@@ -30,6 +30,11 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+/* กัน Safari บน iPhone/iPad ขยายตัวอักษรเอง (text autosizing) ตอนหมุนเป็นแนวนอน — WebKit คิด
+   อัตราขยายจากความกว้างของ block แต่ละอันแยกกัน หัวข้อ/เมนู/เนื้อความจึงโตคนละอัตราจนสเกลทั้งหน้า
+   เพี้ยน ทั้งที่ CSS สั่งขนาดไว้ชัดเจนแล้ว (อาการนี้ไม่มีทางเห็นบนเดสก์ท็อป — Chromium/Firefox
+   ไม่มีฟีเจอร์นี้ ประกาศบรรทัดนี้ไปก็ไม่เปลี่ยนอะไรที่นั่น) */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -66,7 +71,9 @@ body {
 .container { max-width: 1160px; margin: 0 auto; padding: 32px 24px 24px; }
 .footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; }
 /* ป้ายเวอร์ชัน (base.html) — ข้อมูลมาจาก app/version.py ผ่าน context processor `build` */
-.footer-ver { display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 4px; }
+/* flex-wrap กันเหนียว — แถวนี้ยาวที่สุดตอนธง "มีไฟล์แก้ค้างไว้" ขึ้นพร้อม commit hash
+   บนจอ 320px วัดแล้วยังไม่ล้นจริง แต่ต้นทุนของการปล่อยให้ตกบรรทัดได้เป็นศูนย์ */
+.footer-ver { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin-bottom: 4px; }
 .ver-pill {
   font: 600 11.5px var(--sans); color: var(--neutral-ink); background: var(--neutral-soft);
   border-radius: 999px; padding: 2px 8px; cursor: default;
@@ -1122,6 +1129,19 @@ select:disabled { background-image: none; cursor: not-allowed; }
      อยู่ขั้นเดียวกับตัวอักษรรอบข้าง (.ov-num → head, .arrow/.delta → label) ไม่ค้างโดดขนาดเดสก์ท็อป */
   .bd-rows .ov-num.prev, .bd-rows .ov-num.cur { font-size: var(--bd-fs-head); }
   .bd-rows .ov-tl-row .arrow, .bd-rows .ov-tl-row .delta { font-size: var(--bd-fs-label); }
+
+  /* ── topbar: กัน nav ตกลงไปเป็นบรรทัดที่สอง ──
+     วัดจริงก่อนแก้: brand+nav ของ admin กว้าง 780px + padding 64 + gap 16 = ต้องการ 860px
+     จึง wrap ทุกความกว้างต่ำกว่า 861px ครอบ iPhone 13 mini/14/16 แนวนอน (812/844/852) และ
+     iPad 10.2/Air แนวตั้ง (810/820) ผลคือ topbar สูง 108px แทน 54px = 27–29% ของจอแนวนอน
+     และเพราะเป็น sticky จึงกินพื้นที่นั้นค้างไว้ตลอดการเลื่อน ไม่ใช่แค่ตอนอยู่บนสุด
+
+     subtitle เป็นข้อความประดับ ไม่ใช่ตัวนำทาง และกินราว 150px — ตัดตัวเดียวเหลือ ~630px
+     บวก padding ที่ลดแล้ว 40 + gap 16 = 686px ต่ำกว่า 721px ซึ่งเป็นจุดที่ nav ย้ายลง .botnav
+     อยู่แล้ว จึงไม่เหลือช่วงความกว้างไหนที่ยัง wrap ได้อีก
+     (.topbar padding ของ ≤720 ประกาศไว้ท้ายไฟล์กว่าบล็อกนี้ จึงยังชนะในช่วงมือถือตามเดิม) */
+  .brand .subtitle { display: none; }
+  .topbar { padding: 13px 20px; }
 }
 
 /* toolbar ของธนาคารนี้ — status pill ชิดขวาเสมอ · ปุ่มรอง (เติมข้อมูลย้อนหลัง / ค้นหาประวัติทั้งปี /
@@ -1182,11 +1202,18 @@ summary.ov-grid::-webkit-details-marker { display: none; }
   .em-side { position: static; }
 }
 @media (max-width: 720px) {
-  .container { padding: 20px 16px 92px; }   /* เผื่อที่ให้ .botnav ไม่ทับเนื้อหา */
+  /* ที่เผื่อ .botnav ย้ายไปอยู่ท้าย .footer แล้ว (ดูกฎ .footer ถัดลงไปไม่กี่บรรทัด) — จองไว้ตรงนี้
+     ไม่เคยได้ผล เพราะ <footer> เป็น "พี่น้องที่อยู่ต่อจาก" .container ไม่ใช่ลูกของมัน (base.html)
+     92px เดิมจึงกลายเป็นแค่ช่องว่างเปล่าคั่นกลาง ส่วน footer ยังจมใต้แถบเมนูอยู่ดี */
+  .container { padding: 20px 16px 20px; }
   .topbar { padding: 12px 16px; }
   .brand .subtitle { display: none; }
   .topbar .nav { display: none; }           /* ใช้ .botnav แทน */
-  .footer { padding-bottom: 8px; }
+  /* ที่เผื่อ .botnav ตัวจริง — ต้องอยู่ที่ element สุดท้ายของหน้า ไม่งั้นบรรทัด "ปรับปรุงล่าสุด"
+     กับป้ายเวอร์ชันจมใต้แถบเมนูจนมองไม่เห็นเลย (วัดก่อนแก้: ถูกทับ 100% ของบรรทัด ทุกหน้า
+     ทุก iPhone แนวตั้ง — หน้าสั้นอย่าง /login ที่เอกสารเตี้ยกว่าจอเท่านั้นที่รอด)
+     88px = ความสูง .botnav ที่วัดได้ (~60px) + เผื่อ แล้วบวก safe-area ของเครื่องที่มีแถบ home */
+  .footer { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 
   /* แถบเมนูล่าง */
   .botnav {
@@ -1199,6 +1226,9 @@ summary.ov-grid::-webkit-details-marker { display: none; }
     padding: 8px 4px; border-radius: 10px; text-decoration: none;
     font-size: 10.5px; font-weight: 500; color: #9DA0A6;
   }
+  /* ป้ายต้องอยู่บรรทัดเดียว — "ออกจากระบบ" (ช่องที่ยาวสุดของเมนู admin 6 ช่อง) ตกสองบรรทัด
+     แล้วดันช่องนั้นสูงกว่าเพื่อน ทั้งแถวเลยดูไม่เป็นระเบียบและ botnav สูงขึ้นโดยไม่จำเป็น */
+  .botnav a, .botnav button.navlink { white-space: nowrap; }
   .botnav a.active { color: #fff; background: rgba(255,255,255,.13); }
   .botnav-ic { font-size: 14px; line-height: 1; }
 
@@ -1361,6 +1391,27 @@ summary.ov-grid::-webkit-details-marker { display: none; }
      ค่าเริ่มต้น min-width:auto = ห้ามหดต่ำกว่าความกว้างเนื้อหา ทำให้แถวล้นออกนอกจอแทนที่จะตกบรรทัด) */
   .bd-ident { gap: 12px; }
   .bd-ident > div:last-child { min-width: 0; }
+}
+
+/* ══════════════ จอเตี้ย (มือถือแนวนอน) ══════════════
+   breakpoint ทุกเส้นในไฟล์นี้เป็น max-width ล้วน ไม่มีเส้นไหนรู้จัก "จอเตี้ย" เลย — พอหมุนแนวนอน
+   ความกว้างโตจนหลุดโหมดมือถือ (>720) แต่ความสูงเหลือแค่ 375–430px ส่วนกล่องที่ตั้งความสูงคงที่ไว้
+   ยังสูงเท่าเดิมทุกประการ วัดจริงก่อนแก้ที่ iPhone 16 แนวนอน (จอสูง 393px):
+     .bd-trend-plot 400px · .bd-trend-side 340px · .log-console 460px · .em-side 358px
+   ทุกตัวสูงกว่าทั้งจอ ต้องเลื่อนหลายหน้าจอกว่าจะพ้นกล่องเดียว และ .topbar ยัง sticky กินอีก 54px
+
+   500px เป็นเส้นที่ปลอดภัย: มือถือแนวนอนสูงสุดคือ 430px (16 Pro Max) ส่วนหน้าต่างเดสก์ท็อป/แท็บเล็ต
+   แนวนอนที่เตี้ยที่สุดในเมทริกซ์ทดสอบคือ 800px จึงไม่มีทางโดนกฎชุดนี้
+   **ต้องอยู่ท้ายไฟล์กว่าบล็อก ≤1080** — specificity เท่ากัน (คลาสเดียว) ผู้ชนะตัดสินด้วยลำดับ
+   ประกาศ ถ้าย้ายขึ้นไปไว้ก่อน .bd-trend-side ของ ≤1080 จะกลับมาชนะแล้วกฎนี้ไม่มีผล */
+@media (max-height: 500px) {
+  .bd-trend-plot { height: 260px; }
+  /* ต้องสั่ง height:auto ด้วย — กรณีจอกว้างเกิน 1080 แต่เตี้ย (เช่นหน้าต่าง 1366×400) บล็อก ≤1080
+     ไม่ทำงาน กฎฐาน .bd-trend-side{height:480px} จึงยังอยู่ แล้ว max-height เฉย ๆ เอาไม่ลง */
+  .bd-trend-side { height: auto; max-height: 190px; }
+  .log-console { height: 240px; }
+  /* แผงสรุปอีเมลสูงเกือบเท่าจอ การ sticky ทำให้มันบังเนื้อหาที่กำลังกรอกแทนที่จะช่วย */
+  .em-side { position: static; }
 }
 
 /* ── หน้าเข้าสู่ระบบผู้ดูแล (/login) ── */

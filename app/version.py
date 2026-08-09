@@ -45,7 +45,12 @@ from datetime import datetime
 # 1.1.6 = deploy: update.sh สั่งหยุดคอนเทนเนอร์ผ่าน API ของ DSM (synowebapi) ก่อน recreate — DSM เลิกส่ง
 #         "Container checkrate stopped unexpectedly" ทุกครั้งที่อัปเดต โดยยังเก็บแจ้งเตือนของเคสที่
 #         คอนเทนเนอร์ตายเองจริงไว้ครบ (ต้องตั้งกฎ sudo หนึ่งบรรทัดบน NAS — ดู DEPLOY.md)
-VERSION = "1.1.6"
+# 1.1.7 = ถอนวิธีของ 1.1.6 ออก (update.sh กลับเป็นพฤติกรรมเดิมทุกบรรทัด) — Container Manager แปลชื่อ
+#         คอนเทนเนอร์เป็น container ID จากฐานข้อมูลของตัวเอง และไม่ sync ให้เองถ้าไม่มีคนเปิดหน้า
+#         Container Manager ขณะที่ compose สร้าง ID ใหม่ทุกครั้งที่ recreate → ยิงจาก Task Scheduler
+#         ได้ "No such container" ทุกรอบ · ทางแก้จริงคือปิด event แจ้งเตือนใน DSM (ไม่ต้องแตะโค้ด)
+#         ผลที่วัดได้ทั้งชุด + สองข้อที่ไม่ใช่เหตุผล บันทึกไว้ใน DEPLOY.md แล้ว
+VERSION = "1.1.7"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

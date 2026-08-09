@@ -356,32 +356,53 @@ cd checkrate && cp .env.example .env    # แล้วแก้ .env ตาม�
 **เป็นสัญญาณเท็จ ไม่ใช่ของพัง** — Container Manager เฝ้าดู event ของ docker เองและเก็บ "สถานะที่ควรเป็น"
 ไว้ในฐานข้อมูลของตัวเอง คอนเทนเนอร์ที่ดับโดยที่ DSM ไม่ได้เป็นคนสั่ง (`docker-compose up -d` ตอน
 recreate = `docker stop` + `rm`) จึงถูกตีเป็นดับเอง **ไม่เกี่ยวกับ exit code และไม่เกี่ยวกับว่า deploy
-สำเร็จหรือไม่** ปล่อยไว้แล้วปัญหาคือวันที่คอนเทนเนอร์ตายเองจริง ๆ อีเมลจะหน้าตาเหมือนกันเป๊ะ จนแยกไม่ออก
+สำเร็จหรือไม่** (`entrypoint.sh` ใช้ `exec uvicorn` → uvicorn เป็น PID 1 รับ SIGTERM เอง ออกด้วย code 0
+อยู่แล้ว) ปล่อยไว้แล้วปัญหาคือวันที่คอนเทนเนอร์ตายเองจริง ๆ อีเมลจะหน้าตาเหมือนกันเป๊ะ จนแยกไม่ออก
 
-`update.sh` แก้ให้แล้วโดยสั่งหยุดผ่าน API ของ DSM เองก่อน (`synowebapi` → DSM บันทึกว่า "ผู้ใช้สั่งหยุด")
-แล้วปล่อยให้ compose สร้างตัวใหม่ตามปกติ — **การแจ้งเตือนของเคสตายเองจริงยังอยู่ครบ** ต่างจากการไปปิด
-event นี้ทิ้งใน Control Panel → Notification
+**ทางแก้: ปิด event นี้ทิ้ง** — Control Panel → **Notification** → แท็บ **Rules** (DSM รุ่นเก่าเรียก
+**Advanced**) → หา **Container Manager** ในรายการ → เอาติ๊กของ event ที่ว่าด้วยคอนเทนเนอร์หยุดทำงานออก
 
-แต่ `synowebapi` เรียกได้เฉพาะ `root` ขณะที่ task นี้ตั้งใจรันเป็น `bom321` (ดูตารางข้างบนว่าทำไม)
-จึงต้องเปิดสิทธิ์ให้หนึ่งคำสั่ง **ตั้งครั้งเดียวบน NAS** (SSH เข้าไปแล้ว):
+ยอมเสียการแจ้งเตือนของเคสที่คอนเทนเนอร์ตายเองจริงไป แต่ถึงเปิดไว้ก็แยกจากสัญญาณเท็จไม่ออกอยู่แล้ว
+ส่วนที่ยังเหลือเป็นตาข่ายรับ: `update.sh` เช็ค `/api/health` + `RestartCount` ทุกรอบ deploy และถอยกลับ
+อัตโนมัติถ้าเว็บไม่ขึ้น · `healthcheck` ใน `docker-compose.yml` ทำให้ `docker ps` บอกสถานะจริง
 
-```bash
-echo 'bom321 ALL=(root) NOPASSWD: /usr/syno/bin/synowebapi --exec api=SYNO.Docker.Container version=1 method=stop name=checkrate' \
-  | sudo tee /etc/sudoers.d/checkrate-synowebapi
-sudo chmod 0440 /etc/sudoers.d/checkrate-synowebapi
-sudo -l -U bom321 | grep synowebapi          # ยืนยันว่ากฎติดแล้ว
+#### ⛔ ห้ามลองแก้ด้วย `synowebapi` (ลองแล้ว เจ็บแล้ว — ส.ค. 2569)
+
+ทางที่ดูน่าจะสวยกว่าคือให้ `update.sh` สั่งหยุดผ่าน API ของ DSM เอง (`synowebapi --exec
+api=SYNO.Docker.Container version=1 method=stop name=checkrate`) เพื่อให้ DSM บันทึกว่า "ผู้ใช้สั่งหยุด"
+แล้วไม่แจ้งเตือน โดยยังเก็บแจ้งเตือนของเคสตายเองจริงไว้ **ทำจริงแล้วใช้ไม่ได้ และอันตราย** —
+ทดสอบบนเครื่องจริง (v1.1.6 แล้วถอนออกใน v1.1.7):
+
+```
+[Line 265] Not a json value: checkrate
+{ "error" : { "code" : 1301, "errors" : { "errors" :
+  "{\"message\":\"No such container: a35f3b1546e5…\"}", "name" : "checkrate" } },
+  "success" : false }
 ```
 
-- **กฎนี้ปักคำสั่งไว้ตายตัว ไม่มี wildcard โดยเจตนา** — `name=*` จะเปิดช่องให้ยัด argument อื่นต่อท้าย
-  แล้วเรียก API อะไรก็ได้ด้วยสิทธิ์ root กลายเป็นช่องยกระดับสิทธิ์ ถ้าเปลี่ยนชื่อคอนเทนเนอร์
-  (`CONTAINER` ใน `update.sh`) ต้องแก้บรรทัดนี้ตามด้วย และรูปแบบ argument ต้องตรงกับที่สคริปต์เรียก
-  เป๊ะ ๆ (`name=checkrate` ไม่มีเครื่องหมายคำพูดซ้อน)
-- **ไม่ตั้งก็ได้ ไม่มีอะไรพัง** — สคริปต์ fail-open: เรียกไม่ได้จะเตือนใน log แล้ว deploy ต่อตามปกติ
-  ผลที่ตามมาคือได้แจ้งเตือนของ DSM เหมือนเดิมเท่านั้น
-- ถ้าแจ้งเตือนกลับมาหลังอัปเกรด DSM ให้เช็คว่าไฟล์ใน `/etc/sudoers.d/` ยังอยู่ (DSM major upgrade
-  เคยล้างทิ้ง) และ `/usr/syno/bin/synowebapi` ยังอยู่ที่เดิม
-- เจอ `sudo: no tty present` ใน `update.log` = sudoers ของเครื่องตั้ง `requiretty` ไว้ เพิ่มบรรทัด
-  `Defaults:bom321 !requiretty` ในไฟล์เดียวกัน
+**เหตุผลที่ตัดสิน — Container Manager แปลชื่อคอนเทนเนอร์เป็น container ID จากฐานข้อมูลของตัวเอง
+และไม่ sync ฐานข้อมูลนั้นเองเลย** ขณะที่ compose สร้าง container ID ใหม่ทุกครั้งที่ recreate:
+
+| วัดอะไร | ผล |
+|---|---|
+| ยิง `method=stop` 2 นาทีหลัง deploy จบ | `No such container: a35f3b…` (ID ก่อน recreate) |
+| ยิงซ้ำ **หลังเปิดหน้า Container Manager** ทิ้งไว้ครู่หนึ่ง | `success: true` ← sync แล้วจึงเล็งถูก |
+| `docker-compose up -d --force-recreate` แล้วยิงทันที **โดยไม่เปิด UI** | `No such container: 1a0ed30a…` |
+
+แถวสุดท้ายคือคำตัดสิน: **ไม่มีคนเปิด UI ให้ = ฐานข้อมูลค้างตลอด** ซึ่งตรงกับสถานการณ์ของ `update.sh`
+ที่รันจาก Task Scheduler เสมอ → API เล็งคอนเทนเนอร์จริงไม่เจอทุกรอบ ไม่มีทางกันแจ้งเตือนได้เลย
+
+สองข้อที่ **ไม่ใช่** เหตุผล (บันทึกไว้กันเข้าใจผิดซ้ำ):
+
+- `Not a json value: checkrate` เป็นเสียงรบกวนเฉย ๆ — บรรทัดถัดไปโชว์ `param={"name":"checkrate"}`
+  แปลว่ามันตีเป็นสตริงถูกแล้ว
+- **การยิง API ตอน ID ค้างไม่ได้เตะคอนเทนเนอร์ที่รันอยู่ทิ้ง** — เทสต์แบบคุมตัวแปรแล้วคอนเทนเนอร์อยู่
+  `Up (healthy)` เฉย ๆ · เคยเจอคอนเทนเนอร์ไปค้างสถานะ `Created` (เว็บดับ) ในช่วงเวลาใกล้กันครั้งหนึ่ง
+  แต่**สาเหตุยังไม่ทราบ** ผู้ต้องสงสัยที่เหลือคือกลไก sync ของ DSM เอง/การเปิดหน้า Container Manager
+  ไม่ใช่ตัวคำสั่ง — ถ้าวันหลังเจอคอนเทนเนอร์อยู่สถานะ `Created` เฉย ๆ ให้นึกถึงเรื่องนี้ก่อน
+  แล้วกู้ด้วย `docker-compose up -d` (`update.sh` ก็กู้ให้เองเพราะ `up -d` อยู่ในเส้นทางปกติแล้ว)
+- ถ้าเคยตั้งกฎ sudo ไว้ตามคู่มือรุ่นก่อน ลบทิ้งได้เลย ไม่มีอะไรใช้มันแล้ว:
+  `sudo rm -f /etc/sudoers.d/checkrate-synowebapi`
 
 ---
 

@@ -50,7 +50,10 @@ from datetime import datetime
 #         Container Manager ขณะที่ compose สร้าง ID ใหม่ทุกครั้งที่ recreate → ยิงจาก Task Scheduler
 #         ได้ "No such container" ทุกรอบ · ทางแก้จริงคือปิด event แจ้งเตือนใน DSM (ไม่ต้องแตะโค้ด)
 #         ผลที่วัดได้ทั้งชุด + สองข้อที่ไม่ใช่เหตุผล บันทึกไว้ใน DEPLOY.md แล้ว
-VERSION = "1.1.7"
+# 1.2.0 = อีเมล error เรื่องเดิมส่งไม่เกิน ERROR_EMAIL_MAX_REPEATS ฉบับ (env ใหม่ ค่าเริ่มต้น 2) + ไฟล์ที่มีในระบบ
+#         แล้วไม่นับเป็น error แม้อ่านวันที่ไม่ได้ (BAY ส่ง error ทุกวันทั้งที่อัปโหลดเองแล้ว) + แถบ/ป้าย
+#         "ตรวจสอบล้มเหลว N วัน" บนหน้า / และ /bank/{code}
+VERSION = "1.2.0"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

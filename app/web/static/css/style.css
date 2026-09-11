@@ -746,6 +746,7 @@ select:disabled { background-image: none; cursor: not-allowed; }
 .ov-updown .off { color: var(--muted-soft); }
 .ov-updown.flat { font: 500 13.5px var(--sans); color: var(--muted-soft); margin-top: 4px; }
 .ov-card-foot { margin-top: auto; padding-top: 12px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.ov-card-foot .ov-err { display:block; margin-top:4px; color:#b91c1c; font-weight:600; }
 
 /* ตารางสรุปรายธนาคาร */
 .ov-panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }

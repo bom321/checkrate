@@ -21,7 +21,6 @@ Flow ร่วม (ไม่มี logic เฉพาะธนาคาร — �
 """
 
 import hashlib, os, sys, time
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import common
@@ -148,6 +147,55 @@ def _with_bank(fn, bank: dict, *args):
         return fn(bank, *args)
 
 
+# ─────────────────────────── ไฟล์เดิมที่มีในระบบแล้ว ───────────────────────────
+def _find_saved_pdf_by_hash(pdf_dir: str, code: str, pdf_bytes: bytes) -> str | None:
+    """คืนชื่อไฟล์ใน pdfs/<CODE>/ ที่เนื้อไบต์ตรงกับ pdf_bytes เป๊ะ (sha256) — ไม่มี → None
+
+    ใช้ตอน effective_date() อ่านวันที่จาก PDF ไม่ได้: ถ้าไฟล์ที่เพิ่งโหลดมาตรงกับไฟล์ที่เก็บไว้แล้ว
+    (เคสจริง BAY: ผู้ใช้อัปโหลดเองพร้อมระบุวันที่ เพราะ parser อ่านวันที่ไม่ออก) แปลว่า "ไม่มีประกาศใหม่"
+    ไม่ใช่ error — ไม่งั้นจะได้อีเมล error ซ้ำทุกวันจนกว่าธนาคารออกประกาศใหม่
+    เทียบ**ทุกไฟล์**ของธนาคารนั้น ไม่ใช่แค่ฉบับล่าสุด เพราะความหมายคือ "มีในระบบแล้ว" — ต้นทุนแฮช
+    โฟลเดอร์ละไม่กี่สิบไฟล์อยู่ในหลักสิบมิลลิวินาที และเกิดเฉพาะรอบที่อ่านวันที่ไม่ได้อยู่แล้ว
+    """
+    if not os.path.isdir(pdf_dir):
+        return None
+    prefix = f"{code.lower()}_deposit_"
+    target = hashlib.sha256(pdf_bytes).hexdigest()
+    for fname in sorted(os.listdir(pdf_dir), reverse=True):   # ใหม่→เก่า: เคสปกติเจอไฟล์แรก
+        if not (fname.startswith(prefix) and fname.endswith(".pdf")):
+            continue
+        try:
+            with open(os.path.join(pdf_dir, fname), "rb") as f:
+                if hashlib.sha256(f.read()).hexdigest() == target:
+                    return fname
+        except OSError as e:
+            log.warning(f"[{code}] เทียบไฟล์ {fname} ไม่ได้: {e}")
+    return None
+
+
+def _report_error(bank: dict, step: str, message: str, **extra) -> None:
+    """จุดเดียวที่รายงาน error ของ run_bank(): log → บันทึก result (นับซ้ำ) → ส่งอีเมลถ้ายังไม่เกินโควตา
+
+    ผู้เรียก return เองหลังเรียกฟังก์ชันนี้ (ไม่ raise) — พฤติกรรม log.error/write_result/send_email
+    เดิมทั้ง 6 จุดใน run_bank() ย้ายมารวมที่นี่ ต่างจากเดิมแค่: นับซ้ำผ่าน common.record_error() แล้ว
+    เรื่องเดิมที่เกิดติดต่อกันเกิน ERROR_EMAIL_MAX_REPEATS ครั้ง **ไม่ส่งอีเมล** (log.warning แทน)
+    log.error ตัวปัญหายังยิงทุกรอบ — log ต้องครบ และ error_tally_sink นับตามเดิม
+    """
+    code = bank["code"]
+    log.error(f"[{code}] {message}")
+    res = common.record_error(code, step, message, **extra)
+    n, first_seen = res["repeat_count"], res["first_seen"]
+    max_repeats = common.error_email_max_repeats()
+    if not common.should_email_error(n, max_repeats):
+        log.warning(f"[{code}] error เดิมติดต่อกันครั้งที่ {n} (ตั้งแต่ {common._thai_datetime(first_seen)}) "
+                    f"— ไม่ส่งอีเมลซ้ำ (ERROR_EMAIL_MAX_REPEATS={max_repeats})")
+        return
+    subject, body = build_error_email(bank, step, message, res["timestamp"],
+                                      repeat_count=n, first_seen=first_seen, max_repeats=max_repeats)
+    ok = send_email(subject, body)
+    common.mark_error_email_sent(code, ok)
+
+
 def run_bank(bank: dict):
     code     = bank["code"]
     targets  = bank["rate_targets"]
@@ -170,21 +218,13 @@ def run_bank(bank: dict):
             log.info(f"[{code}] ไม่พบประกาศใหม่กว่าที่มีอยู่ ({eff})")
             write_result("no_update", bank=code, effective_date=eff)
             return
-        err = "ไม่พบ URL ของประกาศล่าสุด"
-        log.error(f"[{code}] {err}")
-        ts = datetime.now().isoformat(timespec="seconds")
-        write_result("error", bank=code, step="resolve_url", message=err)
-        send_email(*build_error_email(bank, "resolve_url", err, ts))
+        _report_error(bank, "resolve_url", "ไม่พบ URL ของประกาศล่าสุด")
         return
 
     log.info(f"[{code}] Downloading: {latest_url}")
     pdf_bytes = download_pdf(latest_url, bank["referer"], mode=bank.get("fetch_mode", "curl"))
     if pdf_bytes is None:
-        err = "PDF download failed"
-        log.error(f"[{code}] {err}")
-        ts = datetime.now().isoformat(timespec="seconds")
-        write_result("error", bank=code, step="download", message=err)
-        send_email(*build_error_email(bank, "download", err, ts))
+        _report_error(bank, "download", "PDF download failed")
         return
 
     log.info(f"[{code}] Downloaded {len(pdf_bytes):,} bytes")
@@ -192,11 +232,18 @@ def run_bank(bank: dict):
     # 2. Date
     eff_date = banks.effective_date(pdf_bytes, bank)
     if eff_date is None:
-        err = "ไม่สามารถดึงวันที่มีผลจาก PDF ได้"
-        log.error(f"[{code}] {err}")
-        ts = datetime.now().isoformat(timespec="seconds")
-        write_result("error", bank=code, step="date_extraction", message=err)
-        send_email(*build_error_email(bank, "date_extraction", err, ts))
+        # อ่านวันที่ไม่ได้ ≠ ประกาศใหม่เสมอไป — ถ้าไบต์ตรงกับไฟล์ที่เก็บไว้แล้ว (ผู้ใช้อัปโหลดเองพร้อม
+        # ระบุวันที่ เพราะ parser อ่านวันที่ไม่ออก) คือประกาศเดิม ต้องจบแบบ no_update ไม่ใช่ error
+        # ไม่งั้นได้อีเมล error ซ้ำทุกวันจนกว่าธนาคารออกประกาศใหม่ (เคสจริง BAY ก.ย. 2569)
+        # วันที่เอาจากชื่อไฟล์ = source of truth ของประวัติ เหมือน --backfill
+        matched = _find_saved_pdf_by_hash(pdf_dir, code, pdf_bytes)
+        if matched:
+            eff = matched[len(f"{code.lower()}_deposit_"):-len(".pdf")]
+            log.info(f"[{code}] อ่านวันที่จาก PDF ไม่ได้ แต่เนื้อไฟล์ตรงกับ {matched} ที่เก็บไว้แล้ว "
+                     f"— ถือว่าไม่มีประกาศใหม่")
+            write_result("no_update", bank=code, effective_date=eff, matched_pdf=matched)
+            return
+        _report_error(bank, "date_extraction", "ไม่สามารถดึงวันที่มีผลจาก PDF ได้")
         return
 
     log.info(f"[{code}] Effective date: {eff_date}")
@@ -221,11 +268,8 @@ def run_bank(bank: dict):
         # 4. Extract
         rates = banks.extract_rates(pdf_bytes, bank)
         if rates is None:
-            err = "ไม่สามารถ extract อัตราดอกเบี้ยจาก PDF ได้"
-            log.error(f"[{code}] {err}")
-            ts = datetime.now().isoformat(timespec="seconds")
-            write_result("error", bank=code, step="rate_extraction", message=err, effective_date=eff_date)
-            send_email(*build_error_email(bank, "rate_extraction", err, ts))
+            _report_error(bank, "rate_extraction", "ไม่สามารถ extract อัตราดอกเบี้ยจาก PDF ได้",
+                          effective_date=eff_date)
             return
 
         # 4.5 Manual override — ค่าที่ admin กรอกเองทับ (ถ้ามีของประกาศฉบับนี้) ต้องทำก่อนคำนวณ CSV/warnings
@@ -244,11 +288,7 @@ def run_bank(bank: dict):
                 f.write(pdf_bytes)
             log.info(f"[{code}] PDF saved: {pdf_fname}")
         except Exception as e:
-            err = f"ไม่สามารถบันทึก PDF: {e}"
-            log.error(f"[{code}] {err}")
-            ts = datetime.now().isoformat(timespec="seconds")
-            write_result("error", bank=code, step="save_pdf", message=err)
-            send_email(*build_error_email(bank, "save_pdf", err, ts))
+            _report_error(bank, "save_pdf", f"ไม่สามารถบันทึก PDF: {e}")
             return
 
         # 6. Update CSV
@@ -257,11 +297,7 @@ def run_bank(bank: dict):
             changes = append_to_csv(csv_path, eff_date, rates, prev_rates, targets)
             log.info(f"[{code}] CSV updated: {csv_path}")
         except Exception as e:
-            err = f"ไม่สามารถอัปเดต CSV: {e}"
-            log.error(f"[{code}] {err}")
-            ts = datetime.now().isoformat(timespec="seconds")
-            write_result("error", bank=code, step="csv_update", message=err)
-            send_email(*build_error_email(bank, "csv_update", err, ts))
+            _report_error(bank, "csv_update", f"ไม่สามารถอัปเดต CSV: {e}")
             return
 
         # 7. Warnings

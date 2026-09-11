@@ -10,6 +10,10 @@
   const submitBtn = document.getElementById('upload-submit');
 
   openBtn.addEventListener('click', () => { msgEl.textContent = ''; msgEl.className = 'upload-msg'; dlg.showModal(); });
+  // ลิงก์ "อัปโหลดประกาศเอง" ในแถบ error ค้าง (bank_detail.html) — เปิด dialog เดียวกัน ผูกที่นี่แทน onclick
+  // inline เพราะ CSP script-src 'self' บล็อก inline handler (ดูคอมเมนต์ _CSP ใน main.py)
+  const errLink = document.getElementById('error-upload-link');
+  if (errLink) errLink.addEventListener('click', (e) => { e.preventDefault(); openBtn.click(); });
   document.getElementById('upload-cancel').addEventListener('click', () => dlg.close());
 
   async function send(overwrite) {

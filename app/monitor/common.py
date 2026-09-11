@@ -602,6 +602,92 @@ def write_result(result_type: str, **kwargs):
     os.replace(tmp, path)
     log.info(f"Result written: {os.path.basename(path)} type={result_type}")
 
+
+def read_result(bank_code: str) -> dict | None:
+    """อ่าน {code}_result.json ของรอบก่อน — ไม่มีไฟล์/ไฟล์เสีย → None (ฝั่ง monitor ห้าม import
+    data_access ของเว็บ จึงมีตัวอ่านของตัวเอง)"""
+    path = os.path.join(OUTPUT_DIR, f"{str(bank_code).lower()}_result.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+# อีเมล error "เรื่องเดิม" (step + message เท่ากันเป๊ะ) ส่งไม่เกินกี่ครั้งติดต่อกัน — 0 = ไม่จำกัด
+# (พฤติกรรมเดิม) ค่าเริ่มต้น 2: ฉบับแรกแจ้ง ฉบับที่สองเตือนว่าจะเงียบแล้ว หลังจากนั้นดูสถานะที่หน้าเว็บ
+ERROR_EMAIL_MAX_REPEATS_DEFAULT = 2
+
+
+def error_email_max_repeats() -> int:
+    """env ERROR_EMAIL_MAX_REPEATS (int ≥ 0) — ผิดรูป/ติดลบ → ค่าเริ่มต้น อ่านทุกครั้งที่เรียก
+    (ไม่ cache ตอน import) ให้เทสต์ monkeypatch env ได้ และให้ค่าตรงกับที่ฝั่งเว็บอ่านเอง"""
+    raw = os.environ.get("ERROR_EMAIL_MAX_REPEATS", "")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return ERROR_EMAIL_MAX_REPEATS_DEFAULT
+    return n if n >= 0 else ERROR_EMAIL_MAX_REPEATS_DEFAULT
+
+
+def should_email_error(repeat_count: int, max_repeats: int) -> bool:
+    """ส่งอีเมล error รอบนี้ไหม — max 0 = ส่งทุกครั้ง"""
+    return max_repeats == 0 or repeat_count <= max_repeats
+
+
+def _write_result_dict(bank_code: str, data: dict) -> str:
+    """เขียน dict ลง {code}_result.json แบบ atomic (tmp → replace) คืน path — ใช้ร่วมกันใน
+    record_error/mark_error_email_sent ที่ต้องคุม timestamp/คีย์เอง ต่างจาก write_result()"""
+    path = os.path.join(OUTPUT_DIR, f"{str(bank_code).lower()}_result.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return path
+
+
+def record_error(bank_code: str, step: str, message: str, **extra) -> dict:
+    """เขียน result ชนิด error พร้อมนับว่าเป็น "เรื่องเดิม" ติดต่อกันครั้งที่เท่าไหร่
+
+    เรื่องเดิม = result รอบก่อนเป็น error และ step + message เท่ากันเป๊ะ → repeat_count เดิม + 1,
+    first_seen คงเดิม · ไม่งั้น (รอบก่อนสำเร็จ / ไม่มีไฟล์ / เรื่องอื่น) → นับ 1 ใหม่ · result เก่าที่ยัง
+    ไม่มีคีย์พวกนี้ (โค้ดรุ่นก่อน) ถือว่าเคยเจอ 1 ครั้งและ first_seen = timestamp ของมัน
+    รีเซ็ตเองโดยธรรมชาติเพราะรอบที่สำเร็จเขียน result ทับ — ไม่ต้องมี state แยก
+    เขียนไฟล์เองแทนเรียก write_result() เพราะ timestamp กับ first_seen (ครั้งแรก) ต้องเป็นค่าเดียวกันเป๊ะ
+    คืน dict ที่เขียนลงไฟล์ (ผู้เรียกใช้ repeat_count/first_seen ตัดสินใจเรื่องอีเมลต่อ)
+    """
+    prev = read_result(bank_code)
+    now = datetime.now().isoformat(timespec="seconds")
+    if prev and prev.get("type") == "error" and prev.get("step") == step \
+            and prev.get("message") == message:
+        try:
+            prev_count = int(prev.get("repeat_count", 1))
+        except (TypeError, ValueError):
+            prev_count = 1
+        repeat_count = max(prev_count, 1) + 1
+        first_seen = prev.get("first_seen") or prev.get("timestamp") or now
+    else:
+        repeat_count, first_seen = 1, now
+    # **extra ไว้หน้าสุด — ฟิลด์ที่คำนวณเอง (step/repeat_count/first_seen/email_sent) ต้องชนะเสมอ
+    # กันผู้เรียกส่ง kwarg ชื่อชนแล้วทับกลไกนับซ้ำเงียบ ๆ
+    data = {**extra, "type": "error", "timestamp": now, "bank": bank_code, "step": step,
+            "message": message, "first_seen": first_seen, "repeat_count": repeat_count,
+            "email_sent": False}
+    path = _write_result_dict(bank_code, data)
+    log.info(f"Result written: {os.path.basename(path)} type=error repeat={repeat_count}")
+    return data
+
+
+def mark_error_email_sent(bank_code: str, sent: bool) -> None:
+    """อัปเดต email_sent ใน result ที่ record_error เพิ่งเขียน — แยกจาก record_error เพราะรู้ผลส่งทีหลัง
+    result ปัจจุบันไม่ใช่ error (ไม่น่าเกิด) → ไม่แตะไฟล์"""
+    data = read_result(bank_code)
+    if not data or data.get("type") != "error":
+        return
+    data["email_sent"] = bool(sent)
+    _write_result_dict(bank_code, data)
+
 # ─────────────────────────── Email (SMTP) ───────────────────────────
 def get_recipients() -> list[str]:
     """ผู้รับอีเมล: จาก settings.json (email_to) ก่อน ไม่งั้น fallback env EMAIL_TO.
@@ -887,11 +973,14 @@ def build_new_rates_email(bank: dict, eff_date: str, prev_date: str | None,
     return subject, html_body
 
 
-def build_error_email(bank: dict, step: str, message: str, ts: str) -> tuple[str, str]:
+def build_error_email(bank: dict, step: str, message: str, ts: str,
+                      repeat_count: int = 1, first_seen: str | None = None,
+                      max_repeats: int = ERROR_EMAIL_MAX_REPEATS_DEFAULT) -> tuple[str, str]:
     # message มักมาจาก str(exception) โดยตรง — ไม่ใช่ข้อความที่เขียนเองในโค้ดเสมอไป (เช่น pdfplumber
     # โยน exception ที่มีเนื้อหาจาก PDF ปนอยู่ได้) escape ให้หมดกันหลุดเป็น HTML/script จริง
     esc = html.escape
-    # คง "ERROR" ไว้ในหัวข้อคู่กับรหัสธนาคาร — เป็นคำที่ผู้ใช้ตั้ง filter/ค้นหาไว้แล้ว
+    # คง "ERROR" ไว้ในหัวข้อคู่กับรหัสธนาคาร — เป็นคำที่ผู้ใช้ตั้ง filter/ค้นหาไว้แล้ว **ห้ามใส่เลขครั้ง
+    # ในหัวข้อ** (filter ผู้ใช้เทียบหัวข้อ) เลขครั้งอยู่ในเนื้อความเท่านั้น
     subject = f"[{bank['code']} ERROR] ตรวจสอบประกาศอัตราดอกเบี้ยไม่สำเร็จ {ts[:10]}"
     rows = [("วันและเวลาที่ตรวจพบ", esc(_thai_datetime(ts))),
             ("ขั้นตอนที่เกิดข้อผิดพลาด", esc(step)),
@@ -899,6 +988,20 @@ def build_error_email(bank: dict, step: str, message: str, ts: str) -> tuple[str
     rows_html = "".join(
         f"<tr><td style='{_EM_TD};width:200px;color:#334155;background:#f7f9fb'>{k}</td>"
         f"<td style='{_EM_TD}'>{v}</td></tr>" for k, v in rows)
+
+    # ปัญหาเดิมซ้ำ (record_error นับให้) — ฉบับที่ 2 ขึ้นไปบอกว่าเป็นครั้งที่เท่าไหร่ตั้งแต่เมื่อไหร่
+    # และถ้าฉบับนี้เป็นฉบับสุดท้ายที่จะส่ง (ครบ ERROR_EMAIL_MAX_REPEATS) บอกด้วยว่าจะเงียบแล้ว
+    # กันผู้ใช้เข้าใจว่าปัญหาหายไปเอง
+    repeat_html = ""
+    if repeat_count >= 2:
+        since = esc(_thai_datetime(first_seen)) if first_seen else "ก่อนหน้านี้"
+        repeat_html = (f"<p style='margin:18px 0 0;color:#9a3412'>ปัญหานี้เกิดติดต่อกันเป็นครั้งที่ "
+                       f"{int(repeat_count)} ตั้งแต่ {since}")
+        if max_repeats > 0 and repeat_count >= max_repeats:
+            repeat_html += (" — ระบบจะไม่ส่งอีเมลเรื่องนี้ซ้ำอีก จนกว่าปัญหาจะเปลี่ยนไปหรือหายไป "
+                            "ติดตามสถานะได้ที่หน้าเว็บของธนาคารนี้")
+        repeat_html += "</p>"
+
     html_body = f"""
 <div style="{_EM_BODY}">
   <p style="{_EM_HEAD}">ตรวจสอบประกาศของ{esc(bank['name'])} ({esc(bank['code'])}) ไม่สำเร็จ</p>
@@ -910,6 +1013,7 @@ def build_error_email(bank: dict, step: str, message: str, ts: str) -> tuple[str
          style="border-collapse:collapse;width:100%;font-size:14.5px;border:1px solid #d5dbe2">
     {rows_html}
   </table>
+  {repeat_html}
 
   <p style="margin:20px 0 0">ข้อมูลของธนาคารนี้จะยังเป็นค่าเดิมจนกว่าการตรวจสอบรอบถัดไปจะสำเร็จ
   ดูรายละเอียดเพิ่มเติมได้จาก log ของระบบ</p>

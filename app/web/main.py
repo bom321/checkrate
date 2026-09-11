@@ -280,7 +280,9 @@ def _bank_month_summary(bank: dict, month: str) -> dict:
     """
     code = bank["code"]
     rows = da.read_history(code)
-    base = {"bank": bank, "logo": _logo_url(code), "has_data": bool(rows)}
+    base = {"bank": bank, "logo": _logo_url(code), "has_data": bool(rows),
+            # error ที่ค้างอยู่จาก monitor รอบล่าสุด (None = ปกติ) — การ์ดหน้า / โชว์ป้าย, หน้า /bank โชว์แถบ
+            "error_status": da.error_status(code)}
     if not rows:
         return base | {"announce_count": 0, "products": [], "products_all": [],
                        "changed_items": 0, "total_times": 0, "net_sum": 0.0, "up": 0, "down": 0,

@@ -193,6 +193,60 @@ def last_checked(code: str) -> str | None:
     return csv_mtime(code)
 
 
+# ─────────────────────────── สถานะ error ค้าง (จาก result.json) ───────────────────────────
+# ชื่อขั้นตอนที่ run_bank() ใช้ใน result.json → คำไทยสำหรับหน้าเว็บ (step ที่ไม่รู้จักแสดงชื่อดิบ)
+STEP_LABELS = {
+    "resolve_url":     "หา URL ประกาศล่าสุด",
+    "download":        "ดาวน์โหลด PDF",
+    "date_extraction": "อ่านวันที่มีผลจาก PDF",
+    "rate_extraction": "อ่านอัตราดอกเบี้ยจาก PDF",
+    "save_pdf":        "บันทึกไฟล์ PDF",
+    "csv_update":      "อัปเดต CSV",
+}
+
+# step ที่ผู้ใช้แก้เองได้ด้วยการอัปโหลดประกาศ (หน้าเว็บโชว์ลิงก์เปิด #upload-dialog ให้ admin)
+UPLOAD_FIXABLE_STEPS = {"date_extraction", "rate_extraction"}
+
+
+def _today():
+    """แยกไว้ให้เทสต์ monkeypatch วันที่ได้"""
+    return datetime.now().date()
+
+
+def error_status(code: str) -> dict | None:
+    """สถานะ error ที่ค้างอยู่ของธนาคาร (result.json ล่าสุดเป็น error) — ไม่ใช่ error → None
+
+    คืน {step, step_label, message, first_seen, repeat_count, days, emails_paused, upload_fixable}
+    days = ผลต่างของวันที่ปฏิทินจาก first_seen ถึงวันนี้ (ไม่ใช่ช่วง 24 ชม.; 0 = เริ่มวันนี้)
+    emails_paused = monitor หยุดส่งอีเมลเรื่องนี้แล้ว (repeat_count ถึง ERROR_EMAIL_MAX_REPEATS)
+    result เก่าจากโค้ดรุ่นก่อนไม่มี first_seen/repeat_count → ใช้ timestamp และนับ 1
+    """
+    res = load_result(code)
+    if not res or res.get("type") != "error":
+        return None
+    first_seen = res.get("first_seen") or res.get("timestamp") or ""
+    try:
+        repeat_count = max(int(res.get("repeat_count", 1)), 1)
+    except (TypeError, ValueError):
+        repeat_count = 1
+    try:
+        days = (_today() - datetime.fromisoformat(str(first_seen)).date()).days
+    except (TypeError, ValueError):
+        days = 0
+    max_repeats = common.error_email_max_repeats()
+    step = str(res.get("step") or "")
+    return {
+        "step": step,
+        "step_label": STEP_LABELS.get(step, step),
+        "message": str(res.get("message") or ""),
+        "first_seen": first_seen,
+        "repeat_count": repeat_count,
+        "days": max(days, 0),
+        "emails_paused": max_repeats > 0 and repeat_count >= max_repeats,
+        "upload_fixable": step in UPLOAD_FIXABLE_STEPS,
+    }
+
+
 # ─────────────────────────── Manual override (admin กรอกค่าเอง) ───────────────────────────
 MANUAL_RATE_MIN = common.MANUAL_RATE_MIN
 MANUAL_RATE_MAX = common.MANUAL_RATE_MAX

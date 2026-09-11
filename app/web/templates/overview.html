@@ -106,6 +106,10 @@
 
     <div class="ov-card-foot">
       {% if item.last_announce %}ประกาศล่าสุด {{ item.last_announce|thai_date }}{% else %}ยังไม่มีประกาศ{% endif %}
+      {% if item.error_status %}
+        {# monitor รอบล่าสุดล้มเหลว — รายละเอียดอยู่ในแถบบนหน้าธนาคาร #}
+        <span class="ov-err" title="{{ item.error_status.step_label }}">⚠ ตรวจสอบล้มเหลว {% if item.error_status.days > 0 %}{{ item.error_status.days }} วัน{% else %}วันนี้{% endif %}</span>
+      {% endif %}
     </div>
   </a>
   {% else %}

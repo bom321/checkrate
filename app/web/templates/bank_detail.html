@@ -223,6 +223,22 @@
   </div>
 </div>
 
+{% if item.error_status %}
+{# แถบสถานะ: monitor รอบล่าสุดล้มเหลว (result.json type=error) — บอกว่าค้างมากี่วันและหยุดส่งอีเมลแล้วหรือยัง
+   เพราะอีเมล error ส่งไม่เกิน ERROR_EMAIL_MAX_REPEATS ฉบับ หลังจากนั้นหน้านี้คือที่เดียวที่บอกว่ายังพังอยู่
+   message เต็ม (อาจมีข้อความ exception) ให้เฉพาะ admin #}
+{% set es = item.error_status %}
+<div class="notice err">
+  ⚠ {% if es.days > 0 %}ตรวจสอบประกาศไม่สำเร็จติดต่อกัน {{ es.days }} วัน (ตั้งแต่ {{ es.first_seen|thai_date_full }}){% else %}ตรวจสอบประกาศไม่สำเร็จ (วันนี้){% endif %}
+  · ขั้นตอน: {{ es.step_label }}
+  {% if es.emails_paused %} · หยุดส่งอีเมลแจ้งแล้ว{% endif %}
+  {% if is_admin %}
+    {% if es.message %} · {{ es.message }}{% endif %}
+    {% if es.upload_fixable %} — <a href="#" id="error-upload-link" class="link">อัปโหลดประกาศเอง</a>{% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
 {% if item.unreadable %}
 <!-- แถบเตือน: บาง target ของประกาศล่าสุดในเดือนนี้อ่านค่าจาก PDF ไม่ได้ (ถูกปล่อยว่างไว้ ไม่ได้เดา)
      ค่าใน "ปัจจุบัน" ของตารางด้านล่างอาจเป็นค่าที่ยกมาจากประกาศก่อนหน้าเงียบ ๆ — ต้องเตือนให้เห็นชัด #}

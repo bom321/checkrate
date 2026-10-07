@@ -53,7 +53,10 @@ from datetime import datetime
 # 1.2.0 = อีเมล error เรื่องเดิมส่งไม่เกิน ERROR_EMAIL_MAX_REPEATS ฉบับ (env ใหม่ ค่าเริ่มต้น 2) + ไฟล์ที่มีในระบบ
 #         แล้วไม่นับเป็น error แม้อ่านวันที่ไม่ได้ (BAY ส่ง error ทุกวันทั้งที่อัปโหลดเองแล้ว) + แถบ/ป้าย
 #         "ตรวจสอบล้มเหลว N วัน" บนหน้า / และ /bank/{code}
-VERSION = "1.2.0"
+# 1.2.1 = หน้า /logs ไม่ว่างหลัง login อีก: monitor เป็นโปรเซสเดียวที่หมุนไฟล์ log (ตามวันปฏิทิน) ส่วนเว็บเขียน
+#         ต่อท้ายอย่างเดียว (เดิมการส่งอีเมล OTP ทำให้เว็บหมุนไฟล์ ย้าย log รอบเช้าไปไฟล์เก่า) + /logs เติมจาก
+#         ไฟล์ที่หมุนล่าสุดเมื่อไฟล์ปัจจุบันยังสั้น
+VERSION = "1.2.1"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

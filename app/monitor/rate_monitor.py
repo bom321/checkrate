@@ -560,6 +560,7 @@ def backfill_all(banks_list: list[dict], year: int | None = None):
 
 
 if __name__ == "__main__":
+    common.enable_log_rotation()  # monitor เป็นโปรเซสเดียวที่หมุนไฟล์ log — ดู common._DailyLogHandler
     argv = sys.argv[1:]
     if "--test-email" in argv:
         ok = send_email(*build_test_email())

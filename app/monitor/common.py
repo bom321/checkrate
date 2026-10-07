@@ -133,6 +133,94 @@ class _ErrorTallyFilter(logging.Filter):
         return True
 
 
+LOG_BACKUP_COUNT = 90
+_LOG_SUFFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class _DailyLogHandler(logging.handlers.WatchedFileHandler):
+    """ไฟล์ log เดียวที่หลายโปรเซสเขียนร่วมกัน (uvicorn + monitor จาก cron/ปุ่มบนเว็บ) — แทน
+    TimedRotatingFileHandler เดิมที่ทุกโปรเซสหมุนไฟล์เองตามนาฬิกาของตัวเอง (นับจาก mtime ตอนเปิด + 1 วัน):
+    monitor รันจบก่อนถึงกำหนดทุกวันเลยไม่เคยหมุน ส่วน uvicorn เปิดค้างไว้แล้วหมุนตอนเขียนบรรทัดแรกหลังครบ
+    กำหนด = ตอนส่งอีเมล OTP → login ทีไร log รอบเช้าถูกย้ายไปไฟล์เก่า หน้า /logs ว่างทุกครั้ง
+
+    กติกาใหม่: **หมุนเฉพาะโปรเซสที่เปิด `rotate` (monitor ผ่าน enable_log_rotation())** ตามวันปฏิทิน
+    (ดู _rotate_if_new_day) · โปรเซสอื่น (เว็บ) เขียนต่อท้ายอย่างเดียว WatchedFileHandler เปิดไฟล์ใหม่ตามเอง
+    เมื่อ inode เปลี่ยน จึงไม่เขียนค้างลงไฟล์ที่ถูกหมุนไปแล้ว"""
+
+    rotate = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self.rotate:
+            try:
+                self._rotate_if_new_day()
+            except Exception:
+                self.handleError(record)
+        super().emit(record)
+
+    def _rotate_if_new_day(self) -> None:
+        """ตัดสินจาก "วันที่ของบรรทัดแรก" ไม่ใช่ mtime — เว็บอาจเขียนหลังเที่ยงคืนก่อนรอบ 09:00 (เช่น log บูต
+        ตอนคอนเทนเนอร์รีสตาร์ท) ทำให้ mtime เป็นวันนี้ทั้งที่ข้างในยังเป็นของเมื่อวาน · แยกบรรทัดตามวันที่:
+        ของก่อนวันนี้ → `.YYYY-MM-DD` (วันที่ล่าสุดในนั้น) ของวันนี้ → อยู่ไฟล์หลักต่อ"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            with open(self.baseFilename, "r", encoding="utf-8", errors="replace") as f:
+                first = f.readline()
+                if not _LOG_SUFFIX_RE.match(first[:10]) or first[:10] >= today:
+                    return
+                lines = [first] + f.readlines()
+        except FileNotFoundError:
+            return
+        old, new, day, last_old_day = [], [], first[:10], first[:10]
+        for line in lines:
+            if _LOG_SUFFIX_RE.match(line[:10]):
+                day = line[:10]
+            # บรรทัดที่ไม่มีวันที่นำหน้า (traceback) ตามกลุ่มของบรรทัดก่อนหน้า
+            if day < today:
+                old.append(line)
+                last_old_day = day
+            else:
+                new.append(line)
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        # ชื่อชน (ไฟล์จากระบบหมุนแบบเดิมที่ตั้งชื่อเพี้ยนวัน) — ต่อท้ายแทนเขียนทับ ประวัติไม่หาย
+        with open(f"{self.baseFilename}.{last_old_day}", "a", encoding="utf-8") as dst:
+            dst.writelines(old)
+        tmp = self.baseFilename + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.writelines(new)
+        os.replace(tmp, self.baseFilename)  # inode ใหม่ → โปรเซสเว็บเปิดไฟล์ใหม่ตามเอง
+        self._delete_old_backups()
+        # stream เป็น None แล้ว → WatchedFileHandler.emit เปิดไฟล์ใหม่ให้เองตอนเขียน
+
+    def _delete_old_backups(self) -> None:
+        for path in log_backup_paths()[LOG_BACKUP_COUNT:]:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def log_backup_paths() -> list[str]:
+    """ไฟล์ log ที่หมุนแล้ว (`rate_monitor.log.YYYY-MM-DD`) เรียงใหม่สุดก่อน"""
+    folder, base = os.path.split(LOG_PATH)
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    prefix = base + "."
+    days = sorted((n[len(prefix):] for n in names
+                   if n.startswith(prefix) and _LOG_SUFFIX_RE.match(n[len(prefix):])), reverse=True)
+    return [os.path.join(folder, prefix + d) for d in days]
+
+
+def enable_log_rotation() -> None:
+    """ให้โปรเซสนี้เป็นตัวหมุนไฟล์ log — เรียกจาก CLI ของ monitor เท่านั้น (ฝั่งเว็บห้ามเรียก)"""
+    for h in log.handlers:
+        if isinstance(h, _DailyLogHandler):
+            h.rotate = True
+
+
 def _setup_logger() -> logging.Logger:
     logger = logging.getLogger("deposit_monitor")
     if logger.handlers:
@@ -141,9 +229,7 @@ def _setup_logger() -> logging.Logger:
     logger.addFilter(_BankTagFilter())
     logger.addFilter(_ErrorTallyFilter())
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    fh = logging.handlers.TimedRotatingFileHandler(
-        LOG_PATH, when="D", interval=1, backupCount=90, encoding="utf-8"
-    )
+    fh = _DailyLogHandler(LOG_PATH, encoding="utf-8")
     fh.setFormatter(logging.Formatter(
         "%(asctime)s | %(levelname)-7s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     ))

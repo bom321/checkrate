@@ -407,22 +407,30 @@ def _parse_log_line(line: str) -> dict:
 
 
 def tail_log(level: str | None = None, bank: str | None = None, lines: int = 500) -> list[dict]:
-    """อ่าน log จากท้ายไฟล์ แล้ว filter ตาม level/bank"""
+    """อ่าน log จากท้ายไฟล์ แล้ว filter ตาม level/bank — ถ้าไฟล์ปัจจุบันได้ไม่ถึง `lines` บรรทัด (เช่น monitor
+    เพิ่งหมุนไฟล์ตอนรันรอบเช้า) เติมด้วยไฟล์ที่หมุนล่าสุดหนึ่งไฟล์ หน้า /logs จะไม่ว่างหลังขึ้นวันใหม่"""
+    parsed = _filter_log(_read_log_file(LOG_PATH), level, bank)
+    if len(parsed) < lines:
+        backups = common.log_backup_paths()
+        if backups:
+            parsed = _filter_log(_read_log_file(backups[0]), level, bank) + parsed
+    return parsed[-lines:]
+
+
+def _read_log_file(path: str) -> list[dict]:
     try:
-        with open(LOG_PATH, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
-    except FileNotFoundError:
-        return []
     except Exception:
         return []
+    return [_parse_log_line(l.rstrip("\n")) for l in all_lines if l.strip()]
 
-    parsed = [_parse_log_line(l.rstrip("\n")) for l in all_lines if l.strip()]
 
+def _filter_log(parsed: list[dict], level: str | None, bank: str | None) -> list[dict]:
     if level:
         lv = level.strip().upper()
         parsed = [p for p in parsed if p["level"].upper() == lv]
     if bank:
         tag = f"[{bank.strip().upper()}]"
         parsed = [p for p in parsed if tag in p["msg"].upper()]
-
-    return parsed[-lines:]
+    return parsed

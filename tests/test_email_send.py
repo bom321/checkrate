@@ -94,6 +94,23 @@ def test_explicit_to_keeps_recipient_in_to_header(smtp):
     assert rec["to_addrs"] == ["user@example.com"]
 
 
+def test_admins_only_goes_to_admin_emails_as_bcc(smtp, monkeypatch):
+    """admins_only (อีเมล [CODE ERROR]) → ส่งหา ADMIN_EMAILS เท่านั้น ยังซ่อนผู้รับแบบ BCC เหมือน broadcast"""
+    monkeypatch.setenv("ADMIN_EMAILS", "admin1@example.com; admin2@example.com")
+    common.send_email("[TST ERROR] x", "<p>x</p>", admins_only=True)
+    rec = smtp.sent[0]
+    assert rec["to_addrs"] == ["admin1@example.com", "admin2@example.com"]
+    assert "admin1@example.com" not in rec["msg"]["To"]
+    assert rec["msg"]["Bcc"] is None
+
+
+def test_admins_only_falls_back_to_recipients_when_unset(smtp, monkeypatch):
+    """ADMIN_EMAILS ว่าง → ตกไปใช้ผู้รับปกติ กันอีเมล error หายเงียบ"""
+    monkeypatch.delenv("ADMIN_EMAILS", raising=False)
+    common.send_email("[TST ERROR] x", "<p>x</p>", admins_only=True)
+    assert smtp.sent[0]["to_addrs"] == ["a@example.com", "b@example.com"]
+
+
 # ─────────────────────────── (ค) เพดานขนาดไฟล์แนบ ───────────────────────────
 def test_oversize_attachment_is_dropped_but_email_still_sent(smtp, monkeypatch, caplog):
     """ไฟล์เกินเพดาน → ไม่แนบ แต่ยังส่งอีเมลสำเร็จ (โครงกลับไปเป็น alternative เดิม) + มี log เตือน"""

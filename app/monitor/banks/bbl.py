@@ -68,7 +68,9 @@ from . import _maxscan
 PARSER_IDS = ["bbl"]
 
 SITE_BASE = "https://www.bangkokbank.com"
-RATES_PAGE_URL = f"{SITE_BASE}/th-TH/Personal/Other-Services/View-Rates/Deposit-Interest-Rates"
+RATES_PAGE_URL = f"{SITE_BASE}/th/personal/other-services/view-rates/deposit-interest-rates"
+# ประกาศย้อนหลังแยกไปอยู่ใน fragment ของ accordion "ข้อมูลย้อนหลัง" (เว็บใหม่ ต.ค. 2569) — หน้าหลักมีแค่ฉบับปัจจุบัน
+HISTORY_FRAGMENT_URL = f"{SITE_BASE}/th/fragments/accordions/deposit-interest-rates.plain.html"
 
 REQUEST_DELAY_SEC = 2.0      # ไม่พบ challenge page แบบ SCB/KTB แต่หน่วงไว้เพื่อความสุภาพ
 REQUEST_JITTER_SEC = 1.0
@@ -1016,11 +1018,13 @@ def get_effective_date(pdf_bytes: bytes) -> str | None:
 
 
 # ─────────────────────────── Listing / discovery ───────────────────────────
-# หน้า View-Rates มีลิงก์ PDF ของ "ทุกประกาศย้อนหลัง" อยู่ใน HTML ชุดเดียว (ไม่มี AJAX/token แบบ KTB)
-# และ **วันที่มีผลอยู่ในชื่อไฟล์** เช่น depositrates_18jun2026.pdf → ใช้เลือกไฟล์ล่าสุด/กรองรายปีได้เลย
+# **วันที่มีผลอยู่ในชื่อไฟล์** เช่น depositrates-15oct2026.pdf → ใช้เลือกไฟล์ล่าสุด/กรองรายปีได้เลย
+# (ไม่มี AJAX/token แบบ KTB) · เว็บเดิม (ถึง ก.ย. 2569) ทุกประกาศอยู่ในหน้าเดียว path `/-/media/...` ชื่อไฟล์คั่น `_`
+# เว็บใหม่ (AEM, ต.ค. 2569) ย้ายเป็น `/content/dam/...` คั่น `-` และแยกหน้า: ฉบับปัจจุบันอยู่หน้าหลัก ย้อนหลังอยู่ใน
+# HISTORY_FRAGMENT_URL — regex รับทั้งสองแบบ
 _PDF_HREF_RE = re.compile(
-    r'href="(/-/media/[^"]*?/deposit-interest-rates/\d{4}/depositrates_[^"]+?\.pdf)"', re.I)
-_FNAME_DATE_RE = re.compile(r"depositrates_(\d{1,2})([a-z]{3})(\d{4})\.pdf$", re.I)
+    r'href="(/[^"]*?/deposit-interest-rates/\d{4}/depositrates[-_][^"]+?\.pdf)"', re.I)
+_FNAME_DATE_RE = re.compile(r"depositrates[-_](\d{1,2})([a-z]{3})(\d{4})\.pdf$", re.I)
 _ENG_MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 
@@ -1052,21 +1056,21 @@ def _fetch_listing(session=None) -> list[tuple[str, str]] | None:
     """คืน [(วันที่จากชื่อไฟล์ YYYY-MM-DD, URL เต็ม)] ของทุกประกาศในหน้า View-Rates เรียงเก่า→ใหม่
     คืน None ถ้าโหลดหน้าไม่ได้หรือหน้าไม่มีลิงก์เลย (= เว็บเปลี่ยนรูปแบบ ไม่ใช่ 'ไม่มีอัปเดต')"""
     session = session or _new_session()
-    try:
-        r = session.get(RATES_PAGE_URL, timeout=45)
-    except Exception as e:
-        log.error(f"bbl: โหลดหน้าอัตราดอกเบี้ยไม่สำเร็จ: {e}")
-        return None
-    if r.status_code != 200:
-        log.error(f"bbl: โหลดหน้าอัตราดอกเบี้ยไม่สำเร็จ (HTTP {r.status_code})")
-        return None
-
     found: dict[str, str] = {}
-    for m in _PDF_HREF_RE.finditer(r.text):
-        path = m.group(1)
-        date = _date_from_filename(path)
-        if date:
-            found.setdefault(date, SITE_BASE + quote(path, safe="/"))
+    for url in (RATES_PAGE_URL, HISTORY_FRAGMENT_URL):
+        try:
+            r = session.get(url, timeout=45)
+        except Exception as e:
+            log.error(f"bbl: โหลด {url} ไม่สำเร็จ: {e}")
+            continue
+        if r.status_code != 200:
+            log.error(f"bbl: โหลด {url} ไม่สำเร็จ (HTTP {r.status_code})")
+            continue
+        for m in _PDF_HREF_RE.finditer(r.text):
+            path = m.group(1)
+            date = _date_from_filename(path)
+            if date:
+                found.setdefault(date, SITE_BASE + quote(path, safe="/"))
     if not found:
         log.error("bbl: ไม่พบลิงก์ PDF ประกาศอัตราดอกเบี้ยในหน้าเว็บเลย — รูปแบบหน้าเว็บอาจเปลี่ยน")
         return None
@@ -1079,7 +1083,9 @@ def resolve_latest_url(bank: dict) -> str | None:
     code = bank.get("code", "BBL")
     links = _fetch_listing()
     if not links:
-        return None
+        # BBL คืน URL ฉบับล่าสุดทุกรอบเสมอ — หาไม่เจอแปลว่าหน้าเว็บพัง/เปลี่ยน ไม่ใช่ "ไม่มีอัปเดต"
+        # ต้อง raise ไม่ใช่คืน None (None = no_update เงียบ ๆ ใน run_bank ไม่มีอีเมล)
+        raise common.ResolveError("ไม่พบลิงก์ประกาศอัตราดอกเบี้ยบนเว็บธนาคาร — หน้าเว็บอาจเปลี่ยนรูปแบบ")
     date, url = links[-1]
     log.info(f"[{code}] resolve_latest_url: ประกาศล่าสุดตามชื่อไฟล์ {date}")
     return url

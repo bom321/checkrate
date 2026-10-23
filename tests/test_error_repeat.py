@@ -460,3 +460,20 @@ def test_overview_card_shows_error_badge(client, web_bank, data_dir, monkeypatch
     _write_result(data_dir, web_bank, _error_result("2026-09-12T09:00:00", repeat_count=1))
     r = client.get("/?month=2026-09")
     assert "ตรวจสอบล้มเหลว วันนี้" in r.text
+
+
+def test_run_bank_resolve_error_reports_and_emails_admins(bank_env, monkeypatch):
+    """resolver raise ResolveError (เว็บธนาคารเปลี่ยน) → ต้องเป็น error + อีเมลถึง admin
+    ไม่ใช่ no_update เงียบ ๆ แบบคืน None (เคสจริง BBL ต.ค. 2569 — มีประวัติแล้วจึงถูกกลืนเงียบ)"""
+    from app.monitor import rate_monitor, banks, common
+
+    def _broken(b):
+        raise common.ResolveError("ไม่พบลิงก์ประกาศ")
+    calls = []
+    monkeypatch.setattr(banks, "resolve_latest_url", _broken)
+    monkeypatch.setattr(rate_monitor, "send_email", lambda *a, **k: calls.append(k) or True)
+    rate_monitor.run_bank(bank_env["bank"])
+    res = _read(bank_env["out"])
+    assert res["type"] == "error"
+    assert res["step"] == "resolve_url"
+    assert calls == [{"admins_only": True}]

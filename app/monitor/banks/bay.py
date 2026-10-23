@@ -662,8 +662,10 @@ def _fetch_deposit_page_links(max_pages: int = 1,
 def resolve_latest_url(bank: dict) -> str | None:
     links = _fetch_deposit_page_links()  # หน้าแรกพอ — ลิสต์เรียงใหม่→เก่า ประกาศล่าสุดอยู่หน้าแรกเสมอ
     if not links:
+        # โหลดหน้าไม่ได้/โดนบล็อก/เว็บเปลี่ยน ล้วนคืน [] มาที่นี่ — raise ไม่ใช่คืน None
+        # (None = no_update เงียบ ๆ ใน run_bank ไม่มีอีเมล ดู common.ResolveError)
         log.error("bay.resolve_latest_url: หาลิงก์ประกาศจากหน้า deposit rates ไม่เจอ")
-        return None
+        raise common.ResolveError("ไม่พบลิงก์ประกาศอัตราดอกเบี้ยบนเว็บธนาคาร — โหลดหน้าไม่ได้/โดนบล็อก/หน้าเว็บเปลี่ยนรูปแบบ")
     url, eff_date = max(links, key=lambda x: x[1])
     log.info(f"bay.resolve_latest_url: ล่าสุด {eff_date} → {url}")
     return url

@@ -192,7 +192,7 @@ def _report_error(bank: dict, step: str, message: str, **extra) -> None:
         return
     subject, body = build_error_email(bank, step, message, res["timestamp"],
                                       repeat_count=n, first_seen=first_seen, max_repeats=max_repeats)
-    ok = send_email(subject, body)
+    ok = send_email(subject, body, admins_only=True)  # error เชิงเทคนิค → ADMIN_EMAILS (ว่าง = ทุกคน)
     common.mark_error_email_sent(code, ok)
 
 
@@ -207,7 +207,11 @@ def run_bank(bank: dict):
     initialize_if_needed(bank, pdf_dir, csv_path)
 
     # 1. Download — บาง bank (เช่น KBANK) URL ฝังวันที่ ไม่มี URL ล่าสุดคงที่ ต้อง resolve ก่อน
-    latest_url = banks.resolve_latest_url(bank)
+    try:
+        latest_url = banks.resolve_latest_url(bank)
+    except common.ResolveError as e:
+        _report_error(bank, "resolve_url", str(e))
+        return
     if not latest_url:
         # resolver หา "ประกาศใหม่กว่าที่มี" ไม่เจอ — ถ้ามีประวัติอยู่แล้วถือเป็น "ไม่มีอัปเดต" ปกติ
         # (เช่น KBANK ที่ probe วันที่ ส่วนมากจะไม่พบไฟล์ใหม่ในแต่ละรอบที่รัน ไม่ใช่ error)
@@ -560,7 +564,7 @@ def backfill_all(banks_list: list[dict], year: int | None = None):
 
 
 if __name__ == "__main__":
-    common.enable_log_rotation()  # monitor เป็นโปรเซสเดียวที่หมุนไฟล์ log — ดู common._DailyLogHandler
+    common.enable_log_rotation()  # monitor เป็นโปรเซสเดียวที่หมุนไฟล์ log — ดู common._WeeklyLogHandler
     argv = sys.argv[1:]
     if "--test-email" in argv:
         ok = send_email(*build_test_email())

@@ -56,7 +56,11 @@ from datetime import datetime
 # 1.2.1 = หน้า /logs ไม่ว่างหลัง login อีก: monitor เป็นโปรเซสเดียวที่หมุนไฟล์ log (ตามวันปฏิทิน) ส่วนเว็บเขียน
 #         ต่อท้ายอย่างเดียว (เดิมการส่งอีเมล OTP ทำให้เว็บหมุนไฟล์ ย้าย log รอบเช้าไปไฟล์เก่า) + /logs เติมจาก
 #         ไฟล์ที่หมุนล่าสุดเมื่อไฟล์ปัจจุบันยังสั้น
-VERSION = "1.2.1"
+# 1.2.2 = BBL: รองรับเว็บใหม่ (ลิงก์ /content/dam/ · ย้อนหลังอยู่ใน fragment) + resolver ที่หาลิงก์ไม่เจอได้อีเมล
+#         error แทน no_update เงียบ ๆ (ResolveError · BBL/BAY/KTB) + อีเมล [CODE ERROR] ส่งถึง ADMIN_EMAILS เท่านั้น
+#         + curl ได้ข้อมูลที่ไม่ใช่ PDF → ลอง impersonate ต่อเสมอ (เว็บใหม่ BBL ตอบ curl ธรรมดา 0 ไบต์)
+#         + หมุนไฟล์ log รายสัปดาห์ (จันทร์-อาทิตย์) แทนรายวัน หน้า /logs เห็นทั้งสัปดาห์ · ลบไฟล์เก่าตามอายุ 90 วัน
+VERSION = "1.2.2"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

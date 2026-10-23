@@ -21,7 +21,7 @@ CSV read/write, settings.json, result JSON (per-bank) และการส่�
 
 import subprocess, io, re, csv, os, json, logging, logging.handlers, smtplib, ssl, html
 import contextlib, contextvars, hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -133,18 +133,26 @@ class _ErrorTallyFilter(logging.Filter):
         return True
 
 
-LOG_BACKUP_COUNT = 90
+# ไฟล์ที่หมุนแล้วเก็บไว้กี่วัน — ลบตามอายุ (วันที่ในชื่อไฟล์) ไม่ใช่ตามจำนวนไฟล์ เพราะเปลี่ยนจากหมุนรายวันเป็น
+# รายสัปดาห์ (v1.2.2): นับจำนวนไฟล์จะลบไฟล์รายวันเดิมบน NAS ทิ้งก่อนครบอายุทันทีที่หมุนครั้งแรก
+LOG_RETENTION_DAYS = 90
 _LOG_SUFFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-class _DailyLogHandler(logging.handlers.WatchedFileHandler):
+def _week_start(day: str) -> str:
+    """วันจันทร์ของสัปดาห์ที่ `day` (YYYY-MM-DD) อยู่ — สัปดาห์ของไฟล์ log เริ่มวันจันทร์"""
+    d = datetime.strptime(day, "%Y-%m-%d")
+    return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+
+
+class _WeeklyLogHandler(logging.handlers.WatchedFileHandler):
     """ไฟล์ log เดียวที่หลายโปรเซสเขียนร่วมกัน (uvicorn + monitor จาก cron/ปุ่มบนเว็บ) — แทน
     TimedRotatingFileHandler เดิมที่ทุกโปรเซสหมุนไฟล์เองตามนาฬิกาของตัวเอง (นับจาก mtime ตอนเปิด + 1 วัน):
     monitor รันจบก่อนถึงกำหนดทุกวันเลยไม่เคยหมุน ส่วน uvicorn เปิดค้างไว้แล้วหมุนตอนเขียนบรรทัดแรกหลังครบ
     กำหนด = ตอนส่งอีเมล OTP → login ทีไร log รอบเช้าถูกย้ายไปไฟล์เก่า หน้า /logs ว่างทุกครั้ง
 
-    กติกาใหม่: **หมุนเฉพาะโปรเซสที่เปิด `rotate` (monitor ผ่าน enable_log_rotation())** ตามวันปฏิทิน
-    (ดู _rotate_if_new_day) · โปรเซสอื่น (เว็บ) เขียนต่อท้ายอย่างเดียว WatchedFileHandler เปิดไฟล์ใหม่ตามเอง
+    กติกาใหม่: **หมุนเฉพาะโปรเซสที่เปิด `rotate` (monitor ผ่าน enable_log_rotation())** ตามสัปดาห์ปฏิทิน
+    จันทร์-อาทิตย์ (ดู _rotate_if_new_week · เดิมหมุนรายวัน ผู้ใช้เห็นหน้า /logs "หายทุกวัน" จึงขยายเป็นสัปดาห์) · โปรเซสอื่น (เว็บ) เขียนต่อท้ายอย่างเดียว WatchedFileHandler เปิดไฟล์ใหม่ตามเอง
     เมื่อ inode เปลี่ยน จึงไม่เขียนค้างลงไฟล์ที่ถูกหมุนไปแล้ว"""
 
     rotate = False
@@ -152,20 +160,21 @@ class _DailyLogHandler(logging.handlers.WatchedFileHandler):
     def emit(self, record: logging.LogRecord) -> None:
         if self.rotate:
             try:
-                self._rotate_if_new_day()
+                self._rotate_if_new_week()
             except Exception:
                 self.handleError(record)
         super().emit(record)
 
-    def _rotate_if_new_day(self) -> None:
+    def _rotate_if_new_week(self) -> None:
         """ตัดสินจาก "วันที่ของบรรทัดแรก" ไม่ใช่ mtime — เว็บอาจเขียนหลังเที่ยงคืนก่อนรอบ 09:00 (เช่น log บูต
-        ตอนคอนเทนเนอร์รีสตาร์ท) ทำให้ mtime เป็นวันนี้ทั้งที่ข้างในยังเป็นของเมื่อวาน · แยกบรรทัดตามวันที่:
-        ของก่อนวันนี้ → `.YYYY-MM-DD` (วันที่ล่าสุดในนั้น) ของวันนี้ → อยู่ไฟล์หลักต่อ"""
-        today = datetime.now().strftime("%Y-%m-%d")
+        ตอนคอนเทนเนอร์รีสตาร์ท) ทำให้ mtime เป็นวันนี้ทั้งที่ข้างในยังเป็นของสัปดาห์ก่อน · แยกบรรทัดตามวันที่:
+        ของก่อนวันจันทร์สัปดาห์นี้ → `.YYYY-MM-DD` (วันที่ล่าสุดในนั้น) ของสัปดาห์นี้ → อยู่ไฟล์หลักต่อ
+        ชื่อไฟล์ที่หมุนยังเป็นวันที่เดี่ยวรูปแบบเดิม (log_backup_paths/_LOG_SUFFIX_RE ไม่ต้องแก้)"""
+        this_week = _week_start(datetime.now().strftime("%Y-%m-%d"))  # ขอบล่างของ "สัปดาห์นี้"
         try:
             with open(self.baseFilename, "r", encoding="utf-8", errors="replace") as f:
                 first = f.readline()
-                if not _LOG_SUFFIX_RE.match(first[:10]) or first[:10] >= today:
+                if not _LOG_SUFFIX_RE.match(first[:10]) or first[:10] >= this_week:
                     return
                 lines = [first] + f.readlines()
         except FileNotFoundError:
@@ -175,7 +184,7 @@ class _DailyLogHandler(logging.handlers.WatchedFileHandler):
             if _LOG_SUFFIX_RE.match(line[:10]):
                 day = line[:10]
             # บรรทัดที่ไม่มีวันที่นำหน้า (traceback) ตามกลุ่มของบรรทัดก่อนหน้า
-            if day < today:
+            if day < this_week:
                 old.append(line)
                 last_old_day = day
             else:
@@ -194,11 +203,13 @@ class _DailyLogHandler(logging.handlers.WatchedFileHandler):
         # stream เป็น None แล้ว → WatchedFileHandler.emit เปิดไฟล์ใหม่ให้เองตอนเขียน
 
     def _delete_old_backups(self) -> None:
-        for path in log_backup_paths()[LOG_BACKUP_COUNT:]:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+        cutoff = (datetime.now() - timedelta(days=LOG_RETENTION_DAYS)).strftime("%Y-%m-%d")
+        for path in log_backup_paths():
+            if path.rsplit(".", 1)[-1] < cutoff:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
 
 def log_backup_paths() -> list[str]:
@@ -217,7 +228,7 @@ def log_backup_paths() -> list[str]:
 def enable_log_rotation() -> None:
     """ให้โปรเซสนี้เป็นตัวหมุนไฟล์ log — เรียกจาก CLI ของ monitor เท่านั้น (ฝั่งเว็บห้ามเรียก)"""
     for h in log.handlers:
-        if isinstance(h, _DailyLogHandler):
+        if isinstance(h, _WeeklyLogHandler):
             h.rotate = True
 
 
@@ -229,7 +240,7 @@ def _setup_logger() -> logging.Logger:
     logger.addFilter(_BankTagFilter())
     logger.addFilter(_ErrorTallyFilter())
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    fh = _DailyLogHandler(LOG_PATH, encoding="utf-8")
+    fh = _WeeklyLogHandler(LOG_PATH, encoding="utf-8")
     fh.setFormatter(logging.Formatter(
         "%(asctime)s | %(levelname)-7s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     ))
@@ -443,8 +454,12 @@ def _download_pdf_curl(url: str, referer: str) -> bytes | None:
         if b"_Incapsula_Resource" in data:
             log.info("download_pdf: โดน Incapsula challenge — สลับไปโหมด impersonate (ปลดบล็อกอัตโนมัติ)")
             return _download_pdf_impersonate(url, referer)
-        log.error(f"download_pdf: ไม่ใช่ PDF (received {len(data)} bytes, starts: {data[:20]})")
-        return None
+        # ไม่ใช่ PDF แบบอื่น (เคสจริง ต.ค. 2569: เว็บใหม่ของ BBL อยู่หลัง Akamai ตอบ curl ธรรมดาด้วย 0 ไบต์
+        # ทุก referer แต่ impersonate ได้ไฟล์ปกติ) → ลอง impersonate อีกครั้งเดียวก่อนยอมแพ้
+        # ทางนี้เดิมคืน None (= error) อยู่แล้ว ธนาคารที่ curl ได้ PDF ตรง ๆ จึงไม่ถูกแตะ
+        log.warning(f"download_pdf: curl ได้ข้อมูลที่ไม่ใช่ PDF ({len(data)} bytes, starts: {data[:20]}) "
+                    f"— ลองโหมด impersonate")
+        return _download_pdf_impersonate(url, referer)
     except Exception as e:
         log.error(f"download_pdf exception: {e}")
         return None
@@ -733,6 +748,14 @@ def _write_result_dict(bank_code: str, data: dict) -> str:
     return path
 
 
+class ResolveError(Exception):
+    """resolve_latest_url() ของ bank module raise ตัวนี้เมื่อ "หาประกาศไม่ได้เพราะเว็บพัง/เปลี่ยนรูปแบบ"
+    แยกจากการคืน None ที่แปลว่า "ไม่มีประกาศใหม่" (เช่น KBANK probe แล้วไม่เจอไฟล์วันใหม่) — run_bank()
+    กลืน None เป็น no_update เงียบ ๆ เมื่อมีประวัติแล้ว จึงต้องใช้ exception ถึงจะได้อีเมล error
+    (เคสจริง ต.ค. 2569: เว็บ BBL ย้าย path ลิงก์ PDF ระบบเงียบไปจนผู้ใช้สังเกตเอง)
+    ข้อความต้องคงที่ทุกรอบ (ไม่ฝัง URL/เวลา) ไม่งั้นนับเป็นเรื่องใหม่ทุกวัน — ดู ERROR_EMAIL_MAX_REPEATS"""
+
+
 def record_error(bank_code: str, step: str, message: str, **extra) -> dict:
     """เขียน result ชนิด error พร้อมนับว่าเป็น "เรื่องเดิม" ติดต่อกันครั้งที่เท่าไหร่
 
@@ -788,6 +811,13 @@ def get_recipients() -> list[str]:
     return []
 
 
+def get_admin_emails() -> list[str]:
+    """ผู้รับอีเมล error ([CODE ERROR]) จาก env ADMIN_EMAILS ชุดเดียวกับที่ web/auth.py ใช้ให้สิทธิ์ login
+    (คั่นด้วย , หรือ ;) — ว่าง = คืน [] แล้ว send_email(admins_only=True) ตกไปใช้ get_recipients() แทน"""
+    raw = os.environ.get("ADMIN_EMAILS", "")
+    return [x.strip() for x in re.split(r"[;,]", raw) if x.strip()]
+
+
 def _active_smtp_config() -> dict:
     """เลือกชุด SMTP ที่จะใช้ส่งจริง — คีย์ email_provider ใน settings.json ("gmail" ค่าเริ่มต้น |
     "mailplus") ไม่มีใน settings.json ก็ fallback env EMAIL_PROVIDER คืน dict ชุดค่าที่เลือกเสมอ
@@ -827,7 +857,8 @@ def attachment_fits(fname: str, size: int) -> bool:
 
 
 def send_email(subject: str, html_body: str, to: list[str] | None = None,
-               attachments: list[tuple[str, bytes]] | None = None) -> bool:
+               attachments: list[tuple[str, bytes]] | None = None,
+               admins_only: bool = False) -> bool:
     """ส่งอีเมล HTML ผ่าน SMTP (SSL 465 หรือ STARTTLS 587) ใช้ชุด config ที่เลือกไว้ผ่าน
     _active_smtp_config() (Gmail หรือ MailPlus) ไม่ส่ง `to` = ผู้รับตาม get_recipients() เดิม
 
@@ -837,19 +868,23 @@ def send_email(subject: str, html_body: str, to: list[str] | None = None,
     (มี log.warning) แต่อีเมลยังส่งตามปกติ — ห้ามให้อีเมลแจ้งเตือนล้มเพราะไฟล์แนบเด็ดขาด
 
     **เกณฑ์ To / BCC** — ตัดสินจาก `to` อย่างเดียว:
-      • `to is None` = broadcast ตาม get_recipients() (แจ้งประกาศใหม่ / error / test) → ส่งแบบ **BCC**
+      • `to is None` = broadcast ตาม get_recipients() (แจ้งประกาศใหม่ / test / error ผ่าน admins_only) → ส่งแบบ **BCC**
         คือใส่ที่อยู่ผู้ส่งเองในหัว To: แล้วไม่ใส่หัว Bcc: ลงในตัวข้อความ ผู้รับแต่ละคนจึงไม่เห็นอีเมล
         ของคนอื่นในรายชื่อ (ผู้รับจริงเดินทางผ่าน envelope ของ SMTP ที่ to_addrs ข้างล่างเท่านั้น)
       • ผู้เรียกระบุ `to` มาเอง = อีเมลถึงคนคนนั้นโดยเฉพาะ (เคสจริง: OTP login ใน web/auth.py) →
         คง To: เป็นผู้รับคนนั้นเหมือนเดิม ถ้าไปซ่อนเป็น BCC ด้วย ผู้ใช้จะเห็นอีเมลรหัสของตัวเองเป็น
         อีเมลที่ไม่ได้จ่าหน้าถึงตน ดูเหมือนสแปมทันที
+
+    admins_only — ส่งหา get_admin_emails() แทน get_recipients() (ผู้เรียกจริง: _report_error ใน
+    rate_monitor — error เชิงเทคนิคผู้รับทั่วไปทำอะไรไม่ได้) ยังเป็น broadcast แบบ **BCC** เหมือนเดิม
+    ADMIN_EMAILS ว่าง → ตกไปใช้ get_recipients() กัน error หายเงียบ ไม่มีผลถ้าระบุ `to` มาเอง
     """
     cfg = _active_smtp_config()
     host, port, user, password, sender = cfg["host"], cfg["port"], cfg["user"], cfg["password"], cfg["sender"]
     # `not to` ไม่ใช่ `to is None` โดยเจตนา — บรรทัดถัดไป (ของเดิม) ให้ to=[] ตกไปใช้ get_recipients()
     # เหมือนกัน จึงเป็น broadcast เหมือนกัน ต้องเป็น BCC ด้วย ไม่งั้นรายชื่อผู้รับหลุดออกไปในหัว To:
     use_bcc = not to
-    recipients = to or get_recipients()
+    recipients = to or (admins_only and get_admin_emails()) or get_recipients()
 
     if not host or not user or not password:
         log.error(f"send_email failed: SMTP config ไม่ครบ ({cfg['label']}) ต้องมี HOST/USER/PASSWORD")

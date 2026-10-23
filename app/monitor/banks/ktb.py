@@ -141,23 +141,26 @@ def _extract_pdf_links(html: str) -> list[tuple[int, str]]:
 def resolve_latest_url(bank: dict) -> str | None:
     """สแกนหน้า rates หาลิงก์ PDF อัตราดอกเบี้ยเงินฝาก เลือก asset id สูงสุด (=ล่าสุด)
     คืน URL เดิมทุกรอบที่รัน (ไม่มี URL คงที่แบบ SCB) — rate_monitor dedupe ด้วยวันที่มีผลจากเนื้อ PDF เอง
-    (แบบเดียวกับที่ SCB ใช้ URL คงที่ทุกวัน) จึงไม่ต้องมี state/cache ที่นี่"""
+    (แบบเดียวกับที่ SCB ใช้ URL คงที่ทุกวัน) จึงไม่ต้องมี state/cache ที่นี่
+
+    หาไม่เจอทุกกรณี raise common.ResolveError ไม่ใช่คืน None (None = no_update เงียบ ๆ ใน run_bank)
+    ข้อความ exception คงที่ (รายละเอียดที่เปลี่ยนทุกรอบอยู่ใน log) — บล็อกชั่วคราวรอบเดียวได้อีเมลถึง admin
+    หนึ่งฉบับ ส่วนบล็อกยาวถูกจำกัดด้วย ERROR_EMAIL_MAX_REPEATS แทนที่จะเงียบไปตลอด"""
     code = bank.get("code", "KTB")
     try:
         session = _new_session()
         r = _get_rates_page(session, code)
     except Exception as e:
         log.error(f"ktb.resolve_latest_url: โหลดหน้า rates ไม่สำเร็จ: {e}")
-        return None
+        raise common.ResolveError("โหลดหน้าอัตราดอกเบี้ยของธนาคารไม่สำเร็จ") from e
     if r.status_code != 200 or _is_blocked(r.text):
-        log.warning(f"[{code}] resolve_latest_url: โหลดหน้า rates ไม่สำเร็จ/โดนบล็อก (HTTP {r.status_code}) "
-                    f"— ลองรอบถัดไป")
-        return None
+        log.warning(f"[{code}] resolve_latest_url: โหลดหน้า rates ไม่สำเร็จ/โดนบล็อก (HTTP {r.status_code})")
+        raise common.ResolveError("โหลดหน้าอัตราดอกเบี้ยของธนาคารไม่สำเร็จหรือโดนบล็อก")
 
     links = _extract_pdf_links(r.text)
     if not links:
         log.error(f"[{code}] resolve_latest_url: ไม่พบลิงก์ PDF อัตราดอกเบี้ยเงินฝากในหน้า rates")
-        return None
+        raise common.ResolveError("ไม่พบลิงก์ประกาศอัตราดอกเบี้ยบนเว็บธนาคาร — หน้าเว็บอาจเปลี่ยนรูปแบบ")
 
     asset_id, url = max(links, key=lambda x: x[0])
     log.info(f"[{code}] resolve_latest_url: ล่าสุด asset_id={asset_id}")

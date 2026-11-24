@@ -358,6 +358,12 @@ def _label_sk(line: dict) -> str:
     ws = line["words"]
     idx = next((i for i in range(1, len(ws)) if _value_of(ws[i]["text"]) is not None), len(ws))
     text = " ".join(w["text"] for w in ws[:idx])
+    # สแกน 1 บิต: OCR อ่านเลขข้อของหัวหมวดเป็นตัวอักษรขยะ + จุด ("9. ประจำ" → "อ . ประจำ", ประกาศ 19 พ.ย. 2569)
+    # _ITEM_RE จับได้แค่เลขข้อที่เป็นตัวเลข ขยะนั้นจึงติดเข้า skeleton แล้วหาหมวดไม่เจอ — ตัดทิ้งเฉพาะรูปแบบ
+    # "token สั้น ≤2 ตัวไม่มีตัวเลข + เครื่องหมายคั่นล้วน" ที่ต้นบรรทัด (เลขข้อปกติไม่เข้าเงื่อนไขนี้)
+    if len(ws) >= 3 and not re.search(r"\d", ws[0]["text"]) and len(ws[0]["text"]) <= 2 \
+            and re.fullmatch(r"[.,:;]", ws[1]["text"]):
+        text = " ".join(w["text"] for w in ws[2:idx])
     return thai_skeleton(_ITEM_RE.sub("", text))
 
 
@@ -504,6 +510,17 @@ def _tenor_unit(line: dict, tenor: int) -> str | None:
         if w["text"].isdigit() and int(w["text"]) == tenor:
             unit: list[str] = []
             for x in ws[j + 1:]:
+                if _value_of(x["text"]) is not None:
+                    break
+                unit.append(x["text"])
+            return thai_skeleton("".join(unit))
+    # fallback: สแกน 1 บิต OCR แยกเลขสองหลักเป็นสองโทเคน ("12" → "1 2", ประกาศ 19 พ.ย. 2569) — ใช้เฉพาะเมื่อ
+    # จับเลขตรง ๆ ไม่เจอเลย (บรรทัดที่เคยอ่านได้ปกติไม่ผ่านทางนี้) และบังคับว่าโทเคนทั้งสองเป็นเลขหลักเดียว
+    for j in range(len(ws) - 1):
+        a, b = ws[j]["text"], ws[j + 1]["text"]
+        if len(a) == 1 and len(b) == 1 and a.isdigit() and b.isdigit() and int(a + b) == tenor:
+            unit = []
+            for x in ws[j + 2:]:
                 if _value_of(x["text"]) is not None:
                     break
                 unit.append(x["text"])

@@ -60,7 +60,8 @@ from datetime import datetime
 #         error แทน no_update เงียบ ๆ (ResolveError · BBL/BAY/KTB) + อีเมล [CODE ERROR] ส่งถึง ADMIN_EMAILS เท่านั้น
 #         + curl ได้ข้อมูลที่ไม่ใช่ PDF → ลอง impersonate ต่อเสมอ (เว็บใหม่ BBL ตอบ curl ธรรมดา 0 ไบต์)
 #         + หมุนไฟล์ log รายสัปดาห์ (จันทร์-อาทิตย์) แทนรายวัน หน้า /logs เห็นทั้งสัปดาห์ · ลบไฟล์เก่าตามอายุ 90 วัน
-VERSION = "1.2.2"
+#   1.2.3 BBL: สแกน 1 บิตทำให้ OCR อ่านเลขข้อหัวหมวด "9. ประจำ" เป็น "อ ." — ตัดขยะนั้นก่อนเทียบ skeleton (ประกาศ 19 พ.ย. 2569)
+VERSION = "1.2.3"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)          # .../CheckRate

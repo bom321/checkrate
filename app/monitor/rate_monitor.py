@@ -318,6 +318,12 @@ def run_bank(bank: dict):
             warnings.insert(0, msg)
             log.warning(f"[{code}] {msg}")
 
+        # คุณภาพไฟล์ต้นฉบับ (hook ทางเลือกของ bank module — ตอนนี้มี BBL) เตือนให้เทียบ PDF ซ้ำเมื่อสแกนคุณภาพต่ำ
+        notice = banks.scan_notice(pdf_bytes, bank)
+        if notice:
+            warnings.insert(0, notice)
+            log.warning(f"[{code}] {notice}")
+
         # สรุปปัญหาของประกาศฉบับนี้บรรทัดเดียว รูปแบบเดียวกับสรุปท้ายรอบของ backfill_bank() เป๊ะ
         _log_issue_line(code, eff_date, parsed_missing, manual_applied, tally.get(eff_date, 0))
 

@@ -335,6 +335,37 @@ def _page1_lines(pdf_bytes: bytes, variant: tuple[str, int, int] = OCR_VARIANTS[
     return lines
 
 
+# ─────────────────────────── เตือนคุณภาพสแกน (ใส่ในอีเมลแจ้งประกาศใหม่) ───────────────────────────
+# วัดจริงจาก PDF ของ BBL 50 ไฟล์ (พ.ย. 2569): ต้นเหตุที่ OCR พลาดคือ bit depth ไม่ใช่ความละเอียด — ไฟล์ที่พังเป็น
+# สแกนขาว-ดำ 1 บิต (7 ไฟล์) ไฟล์ปกติเป็น 8 บิต (43 ไฟล์) ทุกไฟล์กว้าง ~2340 px เท่ากัน จึงเตือนที่ 1 บิตเป็นหลัก
+# + กันไว้เผื่อวันหนึ่งความละเอียดตกจริง (ต่ำกว่า MIN_SCAN_WIDTH_PX) · อ่านภาพไม่ได้/ไม่มีภาพ = ไม่เตือน (ไม่เดา)
+MIN_SCAN_WIDTH_PX = 1600
+
+
+def scan_notice(pdf_bytes: bytes) -> str | None:
+    """ข้อความเตือนให้ตรวจค่าซ้ำกับ PDF ถ้าไฟล์สแกนคุณภาพต่ำ — None = ปกติ/ตรวจไม่ได้"""
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            images = pdf.pages[0].images
+    except Exception:
+        return None
+    if not images:
+        return None
+    main = max(images, key=lambda i: (i.get("srcsize") or (0, 0))[0])
+    bits = main.get("bits")
+    width = (main.get("srcsize") or (0, 0))[0]
+    reasons = []
+    if bits == 1:
+        reasons.append("ไฟล์นี้สแกนเป็นขาว-ดำ 1 บิต (ไม่มีเฉดเทา)")
+    if 0 < width < MIN_SCAN_WIDTH_PX:
+        reasons.append(f"ความละเอียดภาพต่ำ (กว้างเพียง {width} พิกเซล)")
+    if not reasons:
+        return None
+    return (" และ ".join(reasons) + " ทำให้ระบบอ่านตัวเลขผิดได้โดยที่ค่าดูปกติ — "
+            "กรุณาเปิดประกาศฉบับเต็ม (PDF) เทียบกับตารางด้านบนให้ครบทุกช่องก่อนนำไปใช้ "
+            "ถ้าพบค่าผิดให้แก้ที่หน้ากรอก/แก้ค่าเอง")
+
+
 # ─────────────────────────── Table anchoring ───────────────────────────
 # เลขข้อ: OCR อ่านเครื่องหมายหลังเลขข้อเพี้ยนได้ ("8. ประจำ" → "8, ประจำ", "2. สะสมทรัพย์" → "(2: สะสมทรัพย์")
 _ITEM_RE = re.compile(r"^[^\dก-ฮa-zA-Z]*(\d{1,2})[.,:;](\d{1,2})?")

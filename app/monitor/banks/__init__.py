@@ -78,6 +78,19 @@ def effective_date(pdf_bytes: bytes, bank: dict) -> str | None:
     return _default_effective_date(pdf_bytes)
 
 
+def scan_notice(pdf_bytes: bytes, bank: dict) -> str | None:
+    """ข้อความเตือนคุณภาพไฟล์ต้นฉบับ (ทางเลือก) — ใช้ scan_notice ของ bank module ถ้ามี
+    คืน None = ไม่มีอะไรต้องเตือน · ผิดพลาดใด ๆ ต้องไม่ทำให้รอบตรวจล้ม (แค่ไม่เตือน)"""
+    mod = _REGISTRY.get(bank.get("parser", ""))
+    if mod is None or not hasattr(mod, "scan_notice"):
+        return None
+    try:
+        return mod.scan_notice(pdf_bytes)
+    except Exception as e:
+        log.warning(f"scan_notice [{bank.get('code', '?')}]: {e}")
+        return None
+
+
 def resolve_latest_url(bank: dict) -> str | None:
     """หา URL ของประกาศล่าสุด — ใช้ resolve_latest_url ของ bank module ถ้ามี
     (เช่น KBANK ที่ URL ฝังวันที่ ไม่มี URL คงที่แบบ SCB) ไม่งั้นใช้ bank['latest_pdf_url'] ตรง ๆ"""

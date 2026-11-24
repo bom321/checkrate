@@ -35,6 +35,8 @@ from . import banks
 
 # จำนวน worker สูงสุดตอนรัน parallel
 MAX_WORKERS = int(os.environ.get("MONITOR_MAX_WORKERS", "5") or "5")
+# backfill เซฟ parse cache ทุกกี่ไฟล์ที่อ่านใหม่ (กันงานยาวถูกฆ่ากลางคันแล้วผล OCR หายหมด)
+CACHE_SAVE_EVERY = 5
 
 # ─────────────────────────── Prev PDF Check ───────────────────────────
 def ensure_prev_pdf_exists(bank: dict, pdf_dir: str, prev_date: str | None):
@@ -365,6 +367,7 @@ def backfill_bank(bank: dict, year: int | None = None):
     tgt_sig    = common.targets_signature(bank)
     parser_sig = banks.parser_signature(bank)
     new_cache: dict = {}
+    fresh_since_save = 0
 
     rows: list[dict] = []
     prev_rates = None
@@ -418,6 +421,15 @@ def backfill_bank(bank: dict, year: int | None = None):
                     # — ไม่ cache ไฟล์ที่ parser อ่านไม่ได้เลย กันรอบถัดไปนึกว่าพาร์สสำเร็จทั้งที่จริงมาจาก manual ล้วน ๆ
                     new_cache[fname] = {"sha256": sha, "targets_sig": tgt_sig,
                                         "parser_sig": parser_sig, "rates": rates}
+                    # เซฟ cache ระหว่างทางทุก CACHE_SAVE_EVERY ไฟล์ที่ parse ใหม่ — เดิมเซฟทีเดียวตอนจบ ถูกฆ่ากลางคัน
+                    # (เคสจริง 24 พ.ย. 2569: restart คอนเทนเนอร์ตอนอ่านไป ~35/50 ไฟล์ ไฟล์ละ 40 วิ) ผลทั้งหมดหาย
+                    # ต้องเริ่ม OCR ใหม่ทุกไฟล์ · เซฟแบบ merge กับ cache เดิม ไม่งั้นรายการของไฟล์ที่ยังไม่ถึงคิว
+                    # (ซึ่งยังใช้ได้) จะหายไปด้วย · CSV ยังเขียนตอนจบอย่างเดียวเหมือนเดิม
+                    if not from_cache:
+                        fresh_since_save += 1
+                        if fresh_since_save >= CACHE_SAVE_EVERY:
+                            common.save_parse_cache(code, {**cache, **new_cache})
+                            fresh_since_save = 0
 
                 final_rates, applied = common.apply_manual(code, date_iso, rates)
                 if applied:
